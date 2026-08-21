@@ -1,0 +1,276 @@
+databaseChangeLog:
+  # =================================================================
+  # PRODUCTION-READY CHANGELOG (Optimized for Fresh Database)
+  # =================================================================
+  # This is the consolidated changelog for clean database deployment.
+  # All fixes, incremental changes, and data migrations have been
+  # incorporated into base changesets for optimal initial setup.
+  # =================================================================
+
+  # Core Foundation
+  # Schemas first: idempotent (IF NOT EXISTS + preconditions MARK_RAN), so existing
+  # databases where the schemas were created out-of-band are unaffected.
+  - include:
+      file: db/changelog/changes/000-create-schemas.yaml
+
+  - include:
+      file: db/changelog/changes/001-core-users-and-channels.yaml
+
+  - include:
+      file: db/changelog/changes/012-tgscan-support.yaml
+
+  - include:
+      file: db/changelog/changes/002-chat-config-stack.yaml
+
+  - include:
+      file: db/changelog/changes/003-messages.yaml
+
+  # Feature Tables
+  - include:
+      file: db/changelog/changes/004-humanization.yaml
+
+  - include:
+      file: db/changelog/changes/005-search.yaml
+
+  - include:
+      file: db/changelog/changes/006-sync.yaml
+
+  - include:
+      file: db/changelog/changes/007-llm-query-log.yaml
+
+  # Message Ranking System
+  - include:
+      file: db/changelog/changes/010-add-ranking-to-existing-tables.yaml
+
+  - include:
+      file: db/changelog/changes/008-message-importance.yaml
+
+  - include:
+      file: db/changelog/changes/016-channel-scoring.yaml
+
+  # Events & Alerts System (Consolidated)
+  - include:
+      file: db/changelog/changes/017-events-alerts-complete.yaml
+
+  - include:
+      file: db/changelog/changes/022-post-subscriptions.yaml
+
+  - include:
+      file: db/changelog/changes/024-events-use-bot-messages.yaml
+
+  # Advanced Features
+  - include:
+      file: db/changelog/changes/015-pending-response-queue.yaml
+
+  - include:
+      file: db/changelog/changes/026-sync-run-log.yaml
+
+  - include:
+      file: db/changelog/changes/027-problematic-chats.yaml
+
+  - include:
+      file: db/changelog/changes/028-optimize-query-indexes.yaml
+
+  # Channel Processing Pipeline (Consolidated)
+  - include:
+      file: db/changelog/changes/029-channel-processing-complete.yaml
+
+  # Multi-Bot Support
+  - include:
+      file: db/changelog/changes/031-bot-instance-support.yaml
+
+  # Chat Message Statistics (Optimized)
+  - include:
+      file: db/changelog/changes/032-chat-message-stats.yaml
+
+  - include:
+      file: db/changelog/changes/033-channel-send-permissions.yaml
+
+  - include:
+      file: db/changelog/changes/034-unique-default-response-template.yaml
+
+  - include:
+      file: db/changelog/changes/035-bot-personas.yaml
+
+  - include:
+      file: db/changelog/changes/036-channels-bot-instance-array.yaml
+
+  - include:
+      file: db/changelog/changes/037-pending-response-config.yaml
+
+  - include:
+      file: db/changelog/changes/038-rate-limits-unify-daily-and-delay.yaml
+
+  - include:
+      file: db/changelog/changes/039-drop-legacy-chat-config-rate-fields.yaml
+
+  - include:
+      file: db/changelog/changes/040-chat-config-multi-stage.yaml
+
+  # News Scoring and Clustering System
+  - include:
+      file: db/changelog/changes/040-scoring-clustering-system.yaml
+
+  - include:
+      file: db/changelog/changes/041-pending-response-unique-active.yaml
+
+  - include:
+      file: db/changelog/changes/042-chat-config-drop-bot-instance.yaml
+
+  - include:
+      file: db/changelog/changes/043-pending-response-unique-active-sending.yaml
+
+  - include:
+      file: db/changelog/changes/044-pending-response-unique-active-ensure.yaml
+
+  # Digest Persona Management System
+  - include:
+      file: db/changelog/changes/045-digest-personas.yaml
+
+  # TDLib Operations Coordination
+  - include:
+      file: db/changelog/changes/046-tdlib-operations.yaml
+
+  # Channel ID Normalization (Fix Python scanner raw peer IDs)
+  - include:
+      file: db/changelog/changes/047-normalize-channel-ids.yaml
+
+  # Source Trust Auto-Population (Sync from channels.weight)
+  - include:
+      file: db/changelog/changes/048-sync-source-trust-trigger.yaml
+
+  # Persona Reaction System
+  - include:
+      file: db/changelog/changes/049-persona-reaction-system.yaml
+
+  # Digest Publish Mode and Anti-Detection Jitter
+  - include:
+      file: db/changelog/changes/050-digest-publish-mode.yaml
+
+  # Pipeline Observability: health view + snapshots table
+  - include:
+      file: db/changelog/changes/051-pipeline-observability.yaml
+
+  # Proactive daily message schedule per persona per chat
+  - include:
+      file: db/changelog/changes/052-proactive-engagements.yaml
+
+  # Backfill proactive_engagements for existing joined channels
+  - include:
+      file: db/changelog/changes/053-backfill-proactive-engagements.yaml
+
+  # Channel activity report: composite index on bot.messages(chat_id, date DESC)
+  - include:
+      file: db/changelog/changes/054-channel-activity-report-index.yaml
+
+  # Test-chat dual-persona seed: activate personas 2000000001 and 2000000002 for chatId=-4964162923
+  - include:
+      file: db/changelog/changes/055-test-chat-dual-persona-seed.yaml
+
+  # Telegram account registry: one row per real account (TDLight session)
+  - include:
+      file: db/changelog/changes/056-telegram-accounts.yaml
+
+  # Owner control plane: global runtime flags (outbound kill switch)
+  - include:
+      file: db/changelog/changes/057-runtime-flags.yaml
+
+  # Persona ↔ chat bindings: which persona lives in which chat (seeded from legacy arrays)
+  - include:
+      file: db/changelog/changes/058-persona-chat-bindings.yaml
+
+  # Per-persona daily activity window (schedule-based "owner is busy")
+  - include:
+      file: db/changelog/changes/059-persona-activity-schedule.yaml
+
+  # Headless login: owner-submitted verification codes / 2FA passwords
+  - include:
+      file: db/changelog/changes/060-auth-codes.yaml
+
+  # Per-(persona, chat) reply probability: each persona decides for itself
+  - include:
+      file: db/changelog/changes/061-persona-chat-reply-probability.yaml
+
+  # DM support: per-persona reply_to_direct toggle + message ingestion provenance
+  - include:
+      file: db/changelog/changes/062-dm-reply-toggle.yaml
+
+  # Table-driven app settings (owner control plane), read via a TTL cache
+  - include:
+      file: db/changelog/changes/063-app-settings.yaml
+
+  # Migrate the consumer's reply-timing / chain-limit / decision-gate knobs into app_settings
+  - include:
+      file: db/changelog/changes/064-app-settings-seed-consumer.yaml
+
+  # SimHash column for near-duplicate clustering (fixes silent no-op: SHA-1 != 16-char)
+  - include:
+      file: db/changelog/changes/065-message-content-simhash.yaml
+
+  # LLM token usage capture: prompt/completion/total_tokens on bot.llm_queries
+  - include:
+      file: db/changelog/changes/066-llm-query-usage.yaml
+
+  # Search keywords for collector-driven channel discovery (F0a)
+  - include:
+      file: db/changelog/changes/067-search-keywords.yaml
+
+  # F1.5 — news-channel history backfill tracking column
+  - include:
+      file: db/changelog/changes/068-channel-backfilled.yaml
+
+  # P1 v1 — proactive single-item news posting: news_posts tracking table
+  - include:
+      file: db/changelog/changes/069-news-posts.yaml
+
+  # Per-post geo tagging + audience-geo filter: RU/UA/KZ/BY/GLOBAL
+  - include:
+      file: db/changelog/changes/070-message-geo.yaml
+
+  # Backfill the value_score column MessageEntity has mapped since #83 (fixes decision-gate BadSqlGrammar)
+  - include:
+      file: db/changelog/changes/071-message-value-score.yaml
+
+  # Unified ranking brain: floored multiplicative importance formula (authority × quality × freshness)
+  - include:
+      file: db/changelog/changes/072-unified-ranking-brain.yaml
+
+  # Controlled inter-persona sibling replies: per-persona knobs, sibling_replies table, global flag
+  - include:
+      file: db/changelog/changes/073-sibling-reply.yaml
+
+  # Fix dual-writer clobber: retarget tgscan.fn_recalc_importance back to tgscan.messages so bot.messages.importance is written only by the #109 Variant B brain
+  - include:
+      file: db/changelog/changes/074-importance-clobber-fix.yaml
+
+  # Fix sqrt-of-negative crash in fn_recompute_importance: clamp Wilson p to [0,1] + GREATEST guard on radicand
+  - include:
+      file: db/changelog/changes/075-ranking-brain-sqrt-fix.yaml
+
+  # Web collector schema (T1): bot.web_sources + tgscan.channels.outlet_trust + app_settings knobs + seed feeds
+  - include:
+      file: db/changelog/changes/076-web-collector-schema.yaml
+
+  # Web-trust ranking brain (T4): outlet_trust authority for web rows in fn_recompute_importance — TG scoring unchanged
+  - include:
+      file: db/changelog/changes/077-web-trust-ranking.yaml
+
+  # News embedding spine (A1): embedded_at column on bot.messages + app_settings knobs for NewsEmbeddingScheduledJob
+  - include:
+      file: db/changelog/changes/078-news-embeddings-qdrant.yaml
+
+  # Hacker News collector (B3): synthetic channel row + app_settings knobs; gated OFF by default
+  - include:
+      file: db/changelog/changes/079-hn-collector.yaml
+
+  # Seed validated operational knobs (cs080): proactive-posting min-value, web-enrich min-value, qdrant-top-k, retention.enabled/days
+  - include:
+      file: db/changelog/changes/080-seed-operational-knobs.yaml
+
+  # Make bot.fn_recompute_importance() fail loud on error (cs081): RAISE WARNING -> RAISE EXCEPTION
+  - include:
+      file: db/changelog/changes/081-ranking-brain-fail-loud.yaml
+
+  # Per-day coin-flip probability for proactive own-news posting (cs082)
+  - include:
+      file: db/changelog/changes/082-seed-daily-post-probability.yaml

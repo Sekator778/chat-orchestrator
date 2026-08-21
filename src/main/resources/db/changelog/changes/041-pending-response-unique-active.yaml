@@ -1,0 +1,27 @@
+databaseChangeLog:
+  - changeSet:
+      id: 041-pending-response-unique-active
+      author: codex
+      comment: "Prevent duplicate active pending responses per (bot_instance_id, chat_id, triggering_message_id)"
+      preConditions:
+        - onFail: MARK_RAN
+        - tableExists:
+            schemaName: bot
+            tableName: pending_responses
+      changes:
+        - sql:
+            dbms: postgresql
+            splitStatements: false
+            stripComments: true
+            sql: |
+              CREATE UNIQUE INDEX IF NOT EXISTS uq_pending_responses_active_trigger
+              ON bot.pending_responses (bot_instance_id, chat_id, triggering_message_id)
+              WHERE status IN ('PENDING', 'ELIGIBLE');
+      rollback:
+        - sql:
+            dbms: postgresql
+            splitStatements: false
+            stripComments: true
+            sql: |
+              DROP INDEX IF EXISTS bot.uq_pending_responses_active_trigger;
+

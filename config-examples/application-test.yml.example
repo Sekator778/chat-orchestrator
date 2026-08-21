@@ -1,0 +1,81 @@
+# Test Environment Configuration
+# Copy to src/main/resources/application-test.yml
+
+spring:
+  application:
+    name: telegram-userbot-test
+
+  r2dbc:
+    url: r2dbc:postgresql://${DATABASE_HOST:localhost}:${DATABASE_PORT:5432}/${DATABASE_NAME:news_aggregator_db}
+    username: ${DATABASE_USERNAME:bot_user}
+    password: ${DATABASE_PASSWORD}
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: ${KAFKA_GROUP_ID:telegram-user-bot-test}
+      auto-offset-reset: earliest
+    producer:
+      retries: 3
+
+  task:
+    scheduling:
+      enabled: true
+      pool:
+        size: 5
+
+# News System Configuration
+news:
+  clustering:
+    enabled: true
+    similarity-threshold: 0.85
+    max-cluster-size: 50
+    ttl-hours: 48
+
+  scoring:
+    enabled: true
+    wilson-confidence: 0.95
+    time-decay-factor: 0.1
+    source-trust-weight: 0.3
+
+  synthesis:
+    enabled: true
+    default-language: en
+    max-digest-messages: 10
+
+  jobs:
+    clustering:
+      enabled: true
+      cron: "0 */15 * * * *"  # Every 15 minutes
+
+    digest-generation:
+      enabled: false  # Disable auto-publishing in test
+      cron: "0 0 8,20 * * *"  # 8 AM and 8 PM
+
+# DeepSeek LLM Configuration
+deepseek:
+  apiKey: ${DEEPSEEK_API_KEY}
+  baseUrl: ${DEEPSEEK_BASE_URL:https://api.deepseek.com}
+  apiUrl: /v1/chat/completions
+  model: deepseek-chat
+  timeout: ${DEEPSEEK_TIMEOUT:30000}
+
+# HTTP API Configuration
+http:
+  enabled: ${HTTP_ENABLED:true}
+
+server:
+  port: ${SERVER_PORT:8080}
+
+# Logging Configuration
+logging:
+  level:
+    root: INFO
+    com.example.telegramuserbot: DEBUG
+    com.example.telegramuserbot.service.ranking: DEBUG
+    frontend.ui: INFO
+  file:
+    path: ${LOGGING_FILE_PATH:logs/application-test.log}
+  pattern:
+    console: "%d{yyyy-MM-DD HH:mm:ss} - %msg%n"
+    file: "%d{yyyy-MM-DD HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"

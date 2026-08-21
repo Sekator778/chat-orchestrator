@@ -1,0 +1,31 @@
+databaseChangeLog:
+  - changeSet:
+      id: 2025-12-11-unique-default-template
+      author: codex
+      changes:
+        - sql:
+            comment: Ensure only one active default template per chat_config
+            splitStatements: false
+            sql: |
+              DELETE FROM bot.response_templates t
+              WHERE t.is_default = true
+                AND t.active = true
+                AND t.id NOT IN (
+                  SELECT id FROM (
+                    SELECT id,
+                           ROW_NUMBER() OVER (PARTITION BY chat_config_id ORDER BY priority DESC, id ASC) AS rn
+                      FROM bot.response_templates
+                     WHERE is_default = true
+                       AND active = true
+                  ) sub
+                  WHERE sub.rn = 1
+                );
+        - createIndex:
+            indexName: uq_response_templates_default_active
+            tableName: response_templates
+            schemaName: bot
+            unique: true
+            columns:
+              - column:
+                  name: chat_config_id
+            where: "is_default = true AND active = true"

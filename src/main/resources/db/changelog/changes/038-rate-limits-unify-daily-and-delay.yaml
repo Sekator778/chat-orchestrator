@@ -1,0 +1,55 @@
+databaseChangeLog:
+  - changeSet:
+      id: rate-limits-038-001-add-daily-counter-and-pending-delay
+      author: codex
+      preConditions:
+        - onFail: HALT
+        - tableExists:
+            tableName: rate_limits
+            schemaName: bot
+      changes:
+        - addColumn:
+            tableName: rate_limits
+            schemaName: bot
+            columns:
+              - column:
+                  name: current_daily_messages
+                  type: INTEGER
+                  defaultValueNumeric: 0
+                  constraints:
+                    nullable: false
+                  remarks: "Daily response counter (migrated from chat_configs.current_daily_messages)."
+              - column:
+                  name: pending_response_delay_seconds
+                  type: INTEGER
+                  defaultValueNumeric: 0
+                  constraints:
+                    nullable: false
+                  remarks: "Minimum delay before sending pending response (migrated from chat_configs.pending_response_delay_seconds)."
+        - sql:
+            comment: "Ensure every chat_config has a rate_limits row"
+            sql: |
+              INSERT INTO bot.rate_limits (chat_config_id)
+              SELECT cc.id
+                FROM bot.chat_configs cc
+               WHERE NOT EXISTS (
+                 SELECT 1 FROM bot.rate_limits rl WHERE rl.chat_config_id = cc.id
+               );
+        - sql:
+            comment: "Migrate daily limit/counter and pending delay from chat_configs into rate_limits (rate_limits becomes source of truth)"
+            sql: |
+              UPDATE bot.rate_limits rl
+                 SET max_messages_per_day = cc.max_daily_messages,
+                     current_daily_messages = COALESCE(cc.current_daily_messages, 0),
+                     pending_response_delay_seconds = COALESCE(cc.pending_response_delay_seconds, 0)
+                FROM bot.chat_configs cc
+               WHERE rl.chat_config_id = cc.id;
+      rollback:
+        - dropColumn:
+            tableName: rate_limits
+            schemaName: bot
+            columnName: pending_response_delay_seconds
+        - dropColumn:
+            tableName: rate_limits
+            schemaName: bot
+            columnName: current_daily_messages

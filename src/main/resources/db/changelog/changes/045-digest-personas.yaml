@@ -1,0 +1,290 @@
+databaseChangeLog:
+  # =================================================================
+  # Digest Persona Management System
+  # =================================================================
+  # Adds:
+  # 1. digest_personas table for persona configuration
+  # 2. digest_history table for tracking published digests
+  # 3. Indexes for efficient queries
+  # =================================================================
+
+  - changeSet:
+      id: 045-create-digest-personas-table
+      author: dev-team
+      comment: "Create digest_personas table for persona-based digest generation"
+      changes:
+        - createTable:
+            schemaName: bot
+            tableName: digest_personas
+            columns:
+              - column:
+                  name: id
+                  type: BIGSERIAL
+                  constraints:
+                    primaryKey: true
+              - column:
+                  name: name
+                  type: VARCHAR(100)
+                  constraints:
+                    nullable: false
+                  remarks: "Human-readable persona name"
+              - column:
+                  name: description
+                  type: TEXT
+                  remarks: "Persona description"
+              - column:
+                  name: bot_id
+                  type: BIGINT
+                  constraints:
+                    nullable: false
+                  remarks: "Telegram user ID for the bot"
+              - column:
+                  name: target_channel_id
+                  type: BIGINT
+                  constraints:
+                    nullable: false
+                  remarks: "Telegram channel ID where digests are published"
+              - column:
+                  name: enabled
+                  type: BOOLEAN
+                  defaultValueBoolean: false
+                  remarks: "Whether this persona is active"
+              # Persona style configuration
+              - column:
+                  name: persona_style
+                  type: VARCHAR(50)
+                  defaultValue: 'PROFESSIONAL'
+                  remarks: "PROFESSIONAL, IRONIC, BREAKING_NEWS, TECHNICAL, CUSTOM"
+              - column:
+                  name: custom_system_prompt
+                  type: TEXT
+                  remarks: "Custom LLM system prompt for CUSTOM style"
+              # Schedule configuration
+              - column:
+                  name: schedule_cron
+                  type: VARCHAR(100)
+                  remarks: "Cron expression for scheduled generation"
+              - column:
+                  name: schedule_timezone
+                  type: VARCHAR(50)
+                  defaultValue: 'UTC'
+                  remarks: "Timezone for schedule evaluation"
+              - column:
+                  name: active_hours_start
+                  type: TIME
+                  remarks: "Start of active hours window"
+              - column:
+                  name: active_hours_end
+                  type: TIME
+                  remarks: "End of active hours window"
+              # Content configuration
+              - column:
+                  name: lookback_hours
+                  type: INTEGER
+                  defaultValueNumeric: 24
+                  remarks: "Hours to look back for messages"
+              - column:
+                  name: max_messages
+                  type: INTEGER
+                  defaultValueNumeric: 10
+                  remarks: "Maximum messages to include in digest"
+              - column:
+                  name: language
+                  type: VARCHAR(8)
+                  defaultValue: 'en'
+                  remarks: "Language for digest generation"
+              - column:
+                  name: min_cluster_size
+                  type: INTEGER
+                  defaultValueNumeric: 2
+                  remarks: "Minimum cluster size to consider"
+              - column:
+                  name: min_importance_score
+                  type: DOUBLE PRECISION
+                  defaultValueNumeric: 0.0
+                  remarks: "Minimum importance score threshold"
+              # Source filtering
+              - column:
+                  name: source_trust_threshold
+                  type: DOUBLE PRECISION
+                  defaultValueNumeric: 0.0
+                  remarks: "Minimum source trust score (0.0 to 1.0)"
+              - column:
+                  name: excluded_channel_ids
+                  type: BIGINT[]
+                  remarks: "Array of channel IDs to exclude"
+              - column:
+                  name: topic_keywords
+                  type: TEXT[]
+                  remarks: "Array of keywords to include"
+              - column:
+                  name: negative_keywords
+                  type: TEXT[]
+                  remarks: "Array of keywords to exclude"
+              # LLM parameters
+              - column:
+                  name: model_name
+                  type: VARCHAR(100)
+                  remarks: "LLM model name override"
+              - column:
+                  name: temperature
+                  type: DOUBLE PRECISION
+                  defaultValueNumeric: 0.7
+                  remarks: "LLM temperature setting"
+              - column:
+                  name: max_tokens
+                  type: INTEGER
+                  defaultValueNumeric: 1000
+                  remarks: "Maximum tokens for LLM response"
+              # Tracking fields
+              - column:
+                  name: last_run_at
+                  type: TIMESTAMP WITH TIME ZONE
+                  remarks: "Timestamp of last digest generation"
+              - column:
+                  name: last_published_digest_id
+                  type: VARCHAR(64)
+                  remarks: "ID of last published digest"
+              - column:
+                  name: total_digests_published
+                  type: INTEGER
+                  defaultValueNumeric: 0
+                  remarks: "Total number of digests published"
+              - column:
+                  name: created_at
+                  type: TIMESTAMP WITH TIME ZONE
+                  defaultValueComputed: NOW()
+              - column:
+                  name: updated_at
+                  type: TIMESTAMP WITH TIME ZONE
+                  defaultValueComputed: NOW()
+
+  - changeSet:
+      id: 045-create-digest-history-table
+      author: dev-team
+      comment: "Create digest_history table for tracking published digests"
+      changes:
+        - createTable:
+            schemaName: bot
+            tableName: digest_history
+            columns:
+              - column:
+                  name: id
+                  type: BIGSERIAL
+                  constraints:
+                    primaryKey: true
+              - column:
+                  name: persona_id
+                  type: BIGINT
+                  constraints:
+                    nullable: false
+                  remarks: "Reference to digest_personas"
+              - column:
+                  name: digest_id
+                  type: VARCHAR(64)
+                  constraints:
+                    nullable: false
+                    unique: true
+                  remarks: "Unique identifier for this digest"
+              - column:
+                  name: content
+                  type: TEXT
+                  constraints:
+                    nullable: false
+                  remarks: "Generated digest content"
+              - column:
+                  name: messages_included
+                  type: INTEGER
+                  remarks: "Number of messages included"
+              - column:
+                  name: clusters_used
+                  type: INTEGER
+                  remarks: "Number of clusters used"
+              - column:
+                  name: generation_time_ms
+                  type: BIGINT
+                  remarks: "Time taken to generate in milliseconds"
+              - column:
+                  name: published_at
+                  type: TIMESTAMP WITH TIME ZONE
+                  remarks: "Timestamp when published to Telegram"
+              - column:
+                  name: telegram_message_id
+                  type: BIGINT
+                  remarks: "Telegram message ID after publishing"
+              - column:
+                  name: status
+                  type: VARCHAR(20)
+                  defaultValue: 'GENERATED'
+                  remarks: "GENERATED, PUBLISHED, FAILED"
+              - column:
+                  name: error_message
+                  type: TEXT
+                  remarks: "Error message if failed"
+              - column:
+                  name: created_at
+                  type: TIMESTAMP WITH TIME ZONE
+                  defaultValueComputed: NOW()
+
+  - changeSet:
+      id: 045-create-digest-personas-indexes
+      author: dev-team
+      comment: "Create indexes for digest_personas table"
+      changes:
+        - createIndex:
+            schemaName: bot
+            tableName: digest_personas
+            indexName: idx_digest_personas_enabled
+            columns:
+              - column:
+                  name: enabled
+        - createIndex:
+            schemaName: bot
+            tableName: digest_personas
+            indexName: idx_digest_personas_bot_id
+            columns:
+              - column:
+                  name: bot_id
+
+  - changeSet:
+      id: 045-create-digest-history-indexes
+      author: dev-team
+      comment: "Create indexes for digest_history table"
+      changes:
+        - createIndex:
+            schemaName: bot
+            tableName: digest_history
+            indexName: idx_digest_history_persona_id
+            columns:
+              - column:
+                  name: persona_id
+        - createIndex:
+            schemaName: bot
+            tableName: digest_history
+            indexName: idx_digest_history_created_at
+            columns:
+              - column:
+                  name: created_at
+                  descending: true
+        - createIndex:
+            schemaName: bot
+            tableName: digest_history
+            indexName: idx_digest_history_status
+            columns:
+              - column:
+                  name: status
+
+  - changeSet:
+      id: 045-add-digest-history-fk
+      author: dev-team
+      comment: "Add foreign key from digest_history to digest_personas"
+      changes:
+        - addForeignKeyConstraint:
+            baseTableSchemaName: bot
+            baseTableName: digest_history
+            baseColumnNames: persona_id
+            constraintName: fk_digest_history_persona
+            referencedTableSchemaName: bot
+            referencedTableName: digest_personas
+            referencedColumnNames: id
+            onDelete: CASCADE

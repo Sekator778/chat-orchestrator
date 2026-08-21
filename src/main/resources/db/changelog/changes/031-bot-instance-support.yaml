@@ -1,0 +1,142 @@
+databaseChangeLog:
+  - changeSet:
+      id: bot-instance-001
+      author: codex
+      comments: Add bot_instance_id to channel-related tables
+      changes:
+        - addColumn:
+            tableName: channels
+            schemaName: tgscan
+            columns:
+              - column:
+                  name: bot_instance_id
+                  type: TEXT
+                  defaultValue: default-bot
+                  constraints:
+                    nullable: false
+        - addColumn:
+            tableName: chat_configs
+            schemaName: bot
+            columns:
+              - column:
+                  name: bot_instance_id
+                  type: TEXT
+                  defaultValue: default-bot
+                  constraints:
+                    nullable: false
+        - addColumn:
+            tableName: sync_configurations
+            columns:
+              - column:
+                  name: bot_instance_id
+                  type: TEXT
+                  defaultValue: default-bot
+                  constraints:
+                    nullable: false
+        - addColumn:
+            tableName: sync_jobs
+            columns:
+              - column:
+                  name: bot_instance_id
+                  type: TEXT
+                  defaultValue: default-bot
+                  constraints:
+                    nullable: false
+        - addColumn:
+            tableName: pending_responses
+            schemaName: bot
+            columns:
+              - column:
+                  name: bot_instance_id
+                  type: TEXT
+                  defaultValue: default-bot
+                  constraints:
+                    nullable: false
+        - addColumn:
+            tableName: problematic_chats
+            schemaName: bot
+            columns:
+              - column:
+                  name: bot_instance_id
+                  type: TEXT
+                  defaultValue: default-bot
+                  constraints:
+                    nullable: false
+        - sql:
+            comment: Backfill existing rows
+            splitStatements: false
+            sql: |
+              UPDATE tgscan.channels SET bot_instance_id = 'default-bot' WHERE bot_instance_id IS NULL;
+              UPDATE bot.chat_configs SET bot_instance_id = 'default-bot' WHERE bot_instance_id IS NULL;
+              UPDATE sync_configurations SET bot_instance_id = 'default-bot' WHERE bot_instance_id IS NULL;
+              UPDATE sync_jobs SET bot_instance_id = 'default-bot' WHERE bot_instance_id IS NULL;
+              UPDATE bot.pending_responses SET bot_instance_id = 'default-bot' WHERE bot_instance_id IS NULL;
+              UPDATE bot.problematic_chats SET bot_instance_id = 'default-bot' WHERE bot_instance_id IS NULL;
+        - dropUniqueConstraint:
+            tableName: chat_configs
+            schemaName: bot
+            constraintName: uq_chat_configs_channel
+        - addUniqueConstraint:
+            tableName: chat_configs
+            schemaName: bot
+            columnNames: channel_chat_id, bot_instance_id
+            constraintName: uq_chat_configs_channel_instance
+        - dropUniqueConstraint:
+            tableName: sync_configurations
+            constraintName: uq_sync_configurations_channel
+        - addUniqueConstraint:
+            tableName: sync_configurations
+            columnNames: channel_id, bot_instance_id
+            constraintName: uq_sync_configurations_channel_instance
+        - createIndex:
+            tableName: channels
+            schemaName: tgscan
+            indexName: idx_tgscan_channels_instance
+            columns:
+              - column:
+                  name: bot_instance_id
+              - column:
+                  name: id
+        - createIndex:
+            tableName: chat_configs
+            schemaName: bot
+            indexName: idx_chat_configs_instance
+            columns:
+              - column:
+                  name: bot_instance_id
+              - column:
+                  name: channel_chat_id
+        - createIndex:
+            tableName: sync_configurations
+            indexName: idx_sync_configurations_instance
+            columns:
+              - column:
+                  name: bot_instance_id
+              - column:
+                  name: channel_id
+        - createIndex:
+            tableName: sync_jobs
+            indexName: idx_sync_jobs_instance
+            columns:
+              - column:
+                  name: bot_instance_id
+              - column:
+                  name: status
+        - createIndex:
+            tableName: pending_responses
+            schemaName: bot
+            indexName: idx_pending_responses_instance
+            columns:
+              - column:
+                  name: bot_instance_id
+              - column:
+                  name: status
+        - createIndex:
+            tableName: problematic_chats
+            schemaName: bot
+            indexName: idx_problematic_chats_instance
+            columns:
+              - column:
+                  name: bot_instance_id
+              - column:
+                  name: channel_chat_id

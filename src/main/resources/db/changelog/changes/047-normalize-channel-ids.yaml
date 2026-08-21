@@ -1,0 +1,206 @@
+databaseChangeLog:
+  # =================================================================
+  # Normalize Channel IDs to Full Telegram Format
+  # =================================================================
+  # Problem: Python scanner was storing raw Telethon peer IDs (e.g., 1193342710)
+  # instead of full Telegram chat_ids (e.g., -1001234567890).
+  # This caused JOIN failures between bot.messages and tgscan.channels
+  # because bot.messages uses full format while tgscan used raw format.
+  #
+  # Solution: Convert all positive channel IDs to -1000000000000 - id format
+  # =================================================================
+
+  - changeSet:
+      id: 047-normalize-tgscan-channels-ids
+      author: dev-team
+      comment: "Normalize channel IDs from raw peer format to full Telegram chat_id format"
+      changes:
+        - sql:
+            comment: "Convert positive channel IDs to -100... format in tgscan.channels"
+            sql: |
+              -- Step 1: Handle potential duplicates by identifying channels that exist
+              -- in both positive and negative formats
+
+              -- Create temp table to track which positive IDs have a negative counterpart
+              CREATE TEMP TABLE _id_mapping AS
+              SELECT
+                  pos.id AS old_id,
+                  (-1000000000000 - pos.id) AS new_id,
+                  neg.id IS NOT NULL AS has_duplicate
+              FROM tgscan.channels pos
+              LEFT JOIN tgscan.channels neg ON neg.id = (-1000000000000 - pos.id)
+              WHERE pos.id > 0;
+
+              -- Step 2: For channels with duplicates, merge data into the negative version
+              -- (prefer to keep existing negative version, update with any missing data from positive)
+              UPDATE tgscan.channels neg
+              SET
+                  weight = COALESCE(neg.weight, pos.weight),
+                  channel_score = COALESCE(neg.channel_score, pos.channel_score),
+                  reliability_alpha = GREATEST(COALESCE(neg.reliability_alpha, 0), COALESCE(pos.reliability_alpha, 0)),
+                  reliability_beta = GREATEST(COALESCE(neg.reliability_beta, 0), COALESCE(pos.reliability_beta, 0)),
+                  raw_keyword_score = GREATEST(COALESCE(neg.raw_keyword_score, 0), COALESCE(pos.raw_keyword_score, 0)),
+                  subscribers = GREATEST(COALESCE(neg.subscribers, 0), COALESCE(pos.subscribers, 0)),
+                  last_seen = GREATEST(COALESCE(neg.last_seen, '1970-01-01'::timestamptz), COALESCE(pos.last_seen, '1970-01-01'::timestamptz))
+              FROM tgscan.channels pos
+              JOIN _id_mapping m ON m.old_id = pos.id AND m.has_duplicate = true
+              WHERE neg.id = m.new_id;
+
+              -- Step 3: Update messages to point to normalized IDs (for duplicates)
+              UPDATE tgscan.messages
+              SET channel_id = m.new_id
+              FROM _id_mapping m
+              WHERE channel_id = m.old_id AND m.has_duplicate = true;
+
+              -- Step 4: Delete the duplicate positive channels (data already merged)
+              DELETE FROM tgscan.channels
+              WHERE id IN (SELECT old_id FROM _id_mapping WHERE has_duplicate = true);
+
+              -- Step 5: For non-duplicate positive IDs, update both tables atomically
+              -- Disable ALL FK constraints referencing tgscan.channels temporarily
+              -- 7 FK constraints total:
+              ALTER TABLE tgscan.messages DROP CONSTRAINT IF EXISTS messages_channel_id_fkey;
+              ALTER TABLE tgscan.source_trust DROP CONSTRAINT IF EXISTS fk_source_trust_channel;
+              ALTER TABLE bot.chat_configs DROP CONSTRAINT IF EXISTS fk_chat_configs_channel;
+              ALTER TABLE bot.chat_configs DROP CONSTRAINT IF EXISTS fk_chat_configs_primary_channel;
+              ALTER TABLE bot.sync_configurations DROP CONSTRAINT IF EXISTS fk_sync_configurations_channel;
+              ALTER TABLE bot.sync_jobs DROP CONSTRAINT IF EXISTS fk_sync_jobs_channel;
+              ALTER TABLE bot.pending_responses DROP CONSTRAINT IF EXISTS fk_pending_responses_chat;
+
+              -- Update channels first (the parent table)
+              UPDATE tgscan.channels
+              SET id = (-1000000000000 - id)
+              WHERE id > 0;
+
+              -- Update all child tables to match new channel IDs
+              UPDATE tgscan.messages
+              SET channel_id = (-1000000000000 - channel_id)
+              WHERE channel_id > 0;
+
+              UPDATE tgscan.source_trust
+              SET channel_id = (-1000000000000 - channel_id)
+              WHERE channel_id > 0;
+
+              UPDATE bot.chat_configs
+              SET channel_chat_id = (-1000000000000 - channel_chat_id)
+              WHERE channel_chat_id > 0;
+
+              UPDATE bot.chat_configs
+              SET primary_channel_id = (-1000000000000 - primary_channel_id)
+              WHERE primary_channel_id > 0;
+
+              UPDATE bot.sync_configurations
+              SET channel_id = (-1000000000000 - channel_id)
+              WHERE channel_id > 0;
+
+              UPDATE bot.sync_jobs
+              SET channel_id = (-1000000000000 - channel_id)
+              WHERE channel_id > 0;
+
+              UPDATE bot.pending_responses
+              SET chat_id = (-1000000000000 - chat_id)
+              WHERE chat_id > 0;
+
+              -- Re-add all FK constraints with original behavior
+              ALTER TABLE tgscan.messages
+              ADD CONSTRAINT messages_channel_id_fkey
+              FOREIGN KEY (channel_id) REFERENCES tgscan.channels(id) ON DELETE CASCADE;
+
+              ALTER TABLE tgscan.source_trust
+              ADD CONSTRAINT fk_source_trust_channel
+              FOREIGN KEY (channel_id) REFERENCES tgscan.channels(id) ON DELETE CASCADE;
+
+              ALTER TABLE bot.chat_configs
+              ADD CONSTRAINT fk_chat_configs_channel
+              FOREIGN KEY (channel_chat_id) REFERENCES tgscan.channels(id) ON DELETE CASCADE;
+
+              ALTER TABLE bot.chat_configs
+              ADD CONSTRAINT fk_chat_configs_primary_channel
+              FOREIGN KEY (primary_channel_id) REFERENCES tgscan.channels(id) ON DELETE SET NULL;
+
+              ALTER TABLE bot.sync_configurations
+              ADD CONSTRAINT fk_sync_configurations_channel
+              FOREIGN KEY (channel_id) REFERENCES tgscan.channels(id) ON DELETE CASCADE;
+
+              ALTER TABLE bot.sync_jobs
+              ADD CONSTRAINT fk_sync_jobs_channel
+              FOREIGN KEY (channel_id) REFERENCES tgscan.channels(id) ON DELETE CASCADE;
+
+              ALTER TABLE bot.pending_responses
+              ADD CONSTRAINT fk_pending_responses_chat
+              FOREIGN KEY (chat_id) REFERENCES tgscan.channels(id) ON DELETE CASCADE;
+
+              -- Cleanup
+              DROP TABLE IF EXISTS _id_mapping;
+
+  - changeSet:
+      id: 047-normalize-channel-candidates-source
+      author: dev-team
+      comment: "Normalize source_channel IDs in channel_candidates table"
+      changes:
+        - sql:
+            comment: "Convert positive source_channel to -100... format"
+            sql: |
+              UPDATE tgscan.channel_candidates
+              SET source_channel = (-1000000000000 - source_channel)
+              WHERE source_channel > 0;
+
+  - changeSet:
+      id: 047-add-channel-id-check-constraint
+      author: dev-team
+      comment: "Add check constraint to ensure channel IDs are always negative (normalized)"
+      changes:
+        - sql:
+            comment: "Add constraint to prevent positive IDs in tgscan.channels"
+            sql: |
+              ALTER TABLE tgscan.channels
+              ADD CONSTRAINT chk_channel_id_normalized
+              CHECK (id < 0);
+        - sql:
+            comment: "Add constraint to prevent positive channel_id in tgscan.messages"
+            sql: |
+              ALTER TABLE tgscan.messages
+              ADD CONSTRAINT chk_message_channel_id_normalized
+              CHECK (channel_id < 0);
+        - sql:
+            comment: "Add constraint to prevent positive source_channel in channel_candidates"
+            sql: |
+              ALTER TABLE tgscan.channel_candidates
+              ADD CONSTRAINT chk_candidate_source_channel_normalized
+              CHECK (source_channel IS NULL OR source_channel < 0);
+        - sql:
+            comment: "Add constraint to prevent positive channel_id in source_trust"
+            sql: |
+              ALTER TABLE tgscan.source_trust
+              ADD CONSTRAINT chk_source_trust_channel_id_normalized
+              CHECK (channel_id < 0);
+        - sql:
+            comment: "Add constraint to prevent positive channel_chat_id in chat_configs"
+            sql: |
+              ALTER TABLE bot.chat_configs
+              ADD CONSTRAINT chk_chat_configs_channel_normalized
+              CHECK (channel_chat_id IS NULL OR channel_chat_id < 0);
+        - sql:
+            comment: "Add constraint to prevent positive primary_channel_id in chat_configs"
+            sql: |
+              ALTER TABLE bot.chat_configs
+              ADD CONSTRAINT chk_chat_configs_primary_channel_normalized
+              CHECK (primary_channel_id IS NULL OR primary_channel_id < 0);
+        - sql:
+            comment: "Add constraint to prevent positive channel_id in sync_configurations"
+            sql: |
+              ALTER TABLE bot.sync_configurations
+              ADD CONSTRAINT chk_sync_configs_channel_normalized
+              CHECK (channel_id IS NULL OR channel_id < 0);
+        - sql:
+            comment: "Add constraint to prevent positive channel_id in sync_jobs"
+            sql: |
+              ALTER TABLE bot.sync_jobs
+              ADD CONSTRAINT chk_sync_jobs_channel_normalized
+              CHECK (channel_id IS NULL OR channel_id < 0);
+        - sql:
+            comment: "Add constraint to prevent positive chat_id in pending_responses"
+            sql: |
+              ALTER TABLE bot.pending_responses
+              ADD CONSTRAINT chk_pending_responses_chat_normalized
+              CHECK (chat_id IS NULL OR chat_id < 0);

@@ -1,0 +1,99 @@
+# =============================================================================
+# DEVELOPMENT ENVIRONMENT CONFIGURATION - EXAMPLE / TEMPLATE
+# =============================================================================
+# Copy this file to application-dev.yml and fill in real values.
+# application-dev.yml is gitignored and must NEVER be committed (it holds secrets).
+
+spring:
+
+  # Development R2DBC Configuration
+  r2dbc:
+    url: r2dbc:postgresql://localhost:5432/news_aggregator_db?schema=bot
+    username: ${DATABASE_USERNAME:postgres}
+    password: ${DATABASE_PASSWORD:}
+
+  # Development Liquibase Settings
+  liquibase:
+    url: jdbc:postgresql://localhost:5432/news_aggregator_db?schema=bot
+    user: ${DATABASE_USERNAME:postgres}
+    password: ${DATABASE_PASSWORD:}
+
+# Development Server Configuration
+server:
+  port: 8099
+
+app:
+  http:
+    enabled: true
+
+# API keys - set via environment variables, never hardcode real keys
+openai:
+  apiKey: ${OPENAI_API_KEY:}
+
+deepseek:
+  apiKey: ${DEEPSEEK_API_KEY:}
+
+# Development Telegram Configuration
+# Get apiId / apiHash from https://my.telegram.org
+telegram:
+  allowedCommandChatId: ${TELEGRAM_COMMAND_CHAT_ID:0}
+  sharedFilesDirectory: "./tdlib-files/shared"
+  accounts:
+    - botId: "ACCOUNT_ONE_ID"
+      name: "Account One"
+      apiId: ${TELEGRAM_API_ID_1:0}
+      apiHash: ${TELEGRAM_API_HASH_1:}
+      phoneNumber: ${TELEGRAM_PHONE_1:}
+      sessionsDirectory: "./tdlib-sessions/account-one"
+      filesDirectory: ""
+    - botId: "ACCOUNT_TWO_ID"
+      name: "Account Two"
+      apiId: ${TELEGRAM_API_ID_2:0}
+      apiHash: ${TELEGRAM_API_HASH_2:}
+      phoneNumber: ${TELEGRAM_PHONE_2:}
+      sessionsDirectory: "./tdlib-sessions/account-two"
+      filesDirectory: ""
+
+bot:
+  persona-ids: "[ACCOUNT_ONE_ID, ACCOUNT_TWO_ID]"
+
+# Development LLM Configuration
+llm:
+  service:
+    enhanced:
+      enabled: true
+
+# Development Logging
+logging:
+  level:
+    root: INFO
+    org.springframework.data.r2dbc: ERROR
+    com.example.telegramuserbot: INFO
+    org.springframework.web: ERROR
+    io.r2dbc: ERROR
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"
+
+# Development Kafka (local)
+kafka:
+  bootstrap-servers: localhost:9092
+
+# Development Persona Reaction System
+persona:
+  reaction:
+    enabled: true
+    delay-min-minutes: 3
+    delay-max-minutes: 12
+
+digest:
+  job:
+    enabled: true
+
+python:
+  scheduler:
+    full-workflow:
+      initial-delay: 3600000   # 1 hour
+
+# Development Media Storage
+media:
+  storageDirectory: ./media-dev

@@ -1,0 +1,104 @@
+databaseChangeLog:
+  - changeSet:
+      id: 073-sibling-reply-columns
+      author: claude
+      comment: "Sibling reply: per-persona knobs on telegram_accounts"
+      changes:
+        - addColumn:
+            schemaName: bot
+            tableName: telegram_accounts
+            columns:
+              - column:
+                  name: sibling_reply_probability
+                  type: double precision
+                  defaultValueNumeric: 0.0
+                  constraints:
+                    nullable: false
+              - column:
+                  name: sibling_reply_min_delay_sec
+                  type: integer
+                  defaultValueNumeric: 90
+                  constraints:
+                    nullable: false
+              - column:
+                  name: sibling_reply_max_delay_sec
+                  type: integer
+                  defaultValueNumeric: 600
+                  constraints:
+                    nullable: false
+              - column:
+                  name: sibling_reply_max_per_day
+                  type: integer
+                  defaultValueNumeric: 3
+                  constraints:
+                    nullable: false
+
+  - changeSet:
+      id: 073-sibling-reply-table
+      author: claude
+      comment: "Sibling reply: idempotency + daily-cap tracking table"
+      changes:
+        - createTable:
+            tableName: sibling_replies
+            schemaName: bot
+            columns:
+              - column:
+                  name: id
+                  type: bigserial
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: persona_bot_id
+                  type: varchar(255)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: chat_id
+                  type: bigint
+                  constraints:
+                    nullable: false
+              - column:
+                  name: in_reply_to_message_id
+                  type: bigint
+                  constraints:
+                    nullable: false
+              - column:
+                  name: origin_bot_id
+                  type: varchar(255)
+                  constraints:
+                    nullable: true
+              - column:
+                  name: posted_at
+                  type: timestamptz
+                  defaultValueComputed: "now()"
+                  constraints:
+                    nullable: false
+        - addUniqueConstraint:
+            tableName: sibling_replies
+            schemaName: bot
+            columnNames: persona_bot_id, in_reply_to_message_id
+            constraintName: uq_sibling_replies_persona_origin_msg
+        - createIndex:
+            tableName: sibling_replies
+            schemaName: bot
+            indexName: idx_sibling_replies_persona_posted
+            columns:
+              - column:
+                  name: persona_bot_id
+              - column:
+                  name: posted_at
+
+  - changeSet:
+      id: 073-sibling-reply-settings
+      author: claude
+      comment: "Sibling reply: global app_settings knobs (master flag OFF, max-per-post 1)"
+      changes:
+        - sql:
+            sql: |
+              INSERT INTO bot.app_settings (name, value, value_type, description) VALUES
+                ('persona.sibling-reply.enabled', 'false', 'bool',
+                 'Master on/off for inter-persona sibling replies. Enable after configuring per-persona probabilities on telegram_accounts.sibling_reply_probability.'),
+                ('persona.sibling-reply.max-per-post', '1', 'int',
+                 'Maximum total sibling replies per origin proactive post across all personas.')
+              ON CONFLICT (name) DO NOTHING;

@@ -1,0 +1,80 @@
+databaseChangeLog:
+  - changeSet:
+      id: pending-queue-stats-001-create-chat-message-stats-optimized
+      author: Codex
+      comment: "Chat message statistics - OPTIMIZED for production (no FK constraint, eliminates need for 034)"
+      preConditions:
+        - onFail: HALT
+        - not:
+            tableExists:
+              schemaName: bot
+              tableName: chat_message_stats
+      changes:
+        - createTable:
+            tableName: chat_message_stats
+            schemaName: bot
+            columns:
+              - column:
+                  name: chat_id
+                  type: BIGINT
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: human_message_count
+                  type: BIGINT
+                  defaultValueNumeric: 0
+                  constraints:
+                    nullable: false
+        # NOTE: No FK constraint to tgscan.channels - allows tracking untracked chats
+        - createIndex:
+            tableName: chat_message_stats
+            schemaName: bot
+            indexName: idx_chat_message_stats_chat
+            columns:
+              - column:
+                  name: chat_id
+
+  - changeSet:
+      id: pending-queue-stats-002-refactor-pending-columns
+      author: Codex
+      comment: "Refactor pending_responses to use centralized chat_message_stats"
+      preConditions:
+        - onFail: HALT
+        - tableExists:
+            schemaName: bot
+            tableName: pending_responses
+      changes:
+        - addColumn:
+            tableName: pending_responses
+            schemaName: bot
+            columns:
+              - column:
+                  name: base_count
+                  type: BIGINT
+                  defaultValueNumeric: 0
+                  constraints:
+                    nullable: false
+              - column:
+                  name: required_delta
+                  type: INTEGER
+                  defaultValueNumeric: 0
+                  constraints:
+                    nullable: false
+        - sql:
+            dbms: postgresql
+            splitStatements: true
+            stripComments: true
+            sql: |
+              UPDATE bot.pending_responses
+                 SET base_count = 0,
+                     required_delta = COALESCE(required_human_replies, 0)
+               WHERE base_count = 0;
+        - dropColumn:
+            tableName: pending_responses
+            schemaName: bot
+            columnName: required_human_replies
+        - dropColumn:
+            tableName: pending_responses
+            schemaName: bot
+            columnName: current_human_replies

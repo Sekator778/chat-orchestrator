@@ -1,0 +1,45 @@
+databaseChangeLog:
+  - changeSet:
+      id: 2026-06-10-app-settings-seed-consumer
+      author: claude
+      changes:
+        - sql:
+            # Consumer-side behavior knobs migrated off @Value into the control plane.
+            # Seeded to the values currently effective on the staging stand, so this
+            # changeset is a behavioral no-op until the owner edits a row:
+            #   - reply-timing + chain-limit: the application code defaults (staging
+            #     does not override them), so the same numbers.
+            #   - decision_gate.*: staging runs the gate ON (BOT_DECISION_GATE_ENABLED=true,
+            #     fail-open true, shape-replies false) — reproduced here. The now-dead
+            #     BOT_DECISION_GATE_* env entries are retired from .env.staging at cutover.
+            sql: |
+              INSERT INTO bot.app_settings (name, value, value_type, description) VALUES
+                ('chain_limit.max_bot_messages_per_post', '4', 'int',
+                 'Cap on consecutive bot messages in one post''s reply chain before the bot stops chiming in.'),
+                ('reply_timing.typing.ms_per_char', '60', 'int',
+                 'Typing-indicator duration per character (test chat only); the rest keep the legacy heuristic.'),
+                ('reply_timing.typing.cap_ms', '8000', 'int',
+                 'Hard cap on the typing-indicator window in ms.'),
+                ('reply_timing.random_delay.min_ms', '0', 'long',
+                 'Lower bound of the pre-send "thinking" delay window (ms).'),
+                ('reply_timing.random_delay.max_ms', '0', 'long',
+                 'Upper bound of the pre-send "thinking" delay (ms). <= 0 turns the random delay OFF (legacy typing-only timing).'),
+                ('reply_timing.stagger.step_ms', '3000', 'long',
+                 'Per-persona stagger added on top of the random draw (personaIndex * step), so two personas never reply at the same instant.'),
+                ('reply_timing.test_chat_id', '-4964162923', 'long',
+                 'Only this chat gets the random-delay + stagger timing; all other chats stay on legacy timing.'),
+                ('decision_gate.enabled', 'true', 'bool',
+                 'Run the ResponseDecisionEngine gate (analyze -> decide) before persona fan-out. Matches the staging stand; set false for the legacy always-fan-out behavior.'),
+                ('decision_gate.shape_replies', 'false', 'bool',
+                 'Apply the engine''s shaping directives (intent/tone/length/delay) to the reply.'),
+                ('decision_gate.fail_open', 'true', 'bool',
+                 'On empty/invalid context or a gate error, proceed to fan-out (mute-averse) instead of dropping the message.')
+              ON CONFLICT (name) DO NOTHING
+      rollback:
+        - sql:
+            sql: |
+              DELETE FROM bot.app_settings WHERE name IN
+                ('chain_limit.max_bot_messages_per_post','reply_timing.typing.ms_per_char',
+                 'reply_timing.typing.cap_ms','reply_timing.random_delay.min_ms','reply_timing.random_delay.max_ms',
+                 'reply_timing.stagger.step_ms','reply_timing.test_chat_id','decision_gate.enabled',
+                 'decision_gate.shape_replies','decision_gate.fail_open')

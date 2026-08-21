@@ -1,0 +1,28 @@
+databaseChangeLog:
+  - changeSet:
+      id: 076-web-collector-schema
+      author: claude
+      comment: >-
+        Web-collector schema (T1 of the "web as co-equal collector" epic).
+        (1) tgscan.channels.outlet_trust double — nullable; NULL = normal TG
+        channel, NOT NULL = web outlet. The ranking brain change that READS
+        this column comes in T4/cs077; this changeset only adds the column and
+        populates it for seeded outlets.
+        (2) bot.web_sources table — registry of RSS/Atom feed endpoints with a
+        synthetic_channel_id in the reserved band -9000000001…-9999999999
+        (between basic-group range ~-5B and supergroup range ~-1.003T, checked
+        exact-id collision = 0 on staging).
+        (3) Seed 8 reputable, live, crypto+finance RSS feeds.
+        (4) Matching tgscan.channels rows (synthetic id, is_channel=true,
+        subscribers=100000 to clear the 1000-gate, outlet_trust=0.5) so the
+        brain's INNER JOIN succeeds without code change.
+        (5) bot.app_settings knobs web-collector.{enabled(false),
+        harvest-interval-min(30),max-items-per-feed(20),
+        dedup-window-hours(168),default-trust(0.5),quality-floor(0.4)}.
+        All inserts are ON CONFLICT DO NOTHING — idempotent re-runs.
+      changes:
+        - sqlFile:
+            path: ../sql/076-web-collector-schema.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false

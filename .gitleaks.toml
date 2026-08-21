@@ -1,0 +1,22 @@
+# gitleaks config for chat-orchestrator.
+# Builds on the bundled default ruleset and narrowly allowlists the
+# placeholder-only example/template files so CI never false-positives on
+# documented sample credentials. Real config (.env, sessions, *.session,
+# logs) is gitignored and never committed.
+title = "chat-orchestrator gitleaks config"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "telegram-bot-token"
+description = "Telegram Bot API token (matches GitHub secret-scanning; gitleaks default missed it)"
+regex = '''[0-9]{8,10}:[A-Za-z0-9_-]{35}'''
+keywords = ["bot", "token", "telegram"]
+
+[allowlist]
+description = "Example/template files contain placeholder credentials only"
+paths = [
+  '''.*\.example$''',
+  '''config-examples/.*''',
+]

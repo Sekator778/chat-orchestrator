@@ -1,0 +1,38 @@
+databaseChangeLog:
+  - changeSet:
+      id: 2026-06-10-runtime-flags-table
+      author: claude
+      changes:
+        - createTable:
+            tableName: runtime_flags
+            schemaName: bot
+            remarks: Global runtime toggles (owner control plane); read by the app on a short poll
+            columns:
+              - column:
+                  name: name
+                  type: VARCHAR(64)
+                  constraints:
+                    primaryKey: true
+              - column:
+                  name: enabled
+                  type: BOOLEAN
+                  defaultValueBoolean: false
+                  constraints:
+                    nullable: false
+              - column:
+                  name: updated_at
+                  type: TIMESTAMPTZ
+                  defaultValueDate: CURRENT_TIMESTAMP
+
+  - changeSet:
+      id: 2026-06-10-runtime-flags-seed-kill-switch
+      author: claude
+      changes:
+        - sql:
+            sql: |
+              INSERT INTO bot.runtime_flags (name, enabled)
+              VALUES ('outbound_kill_switch', false)
+              ON CONFLICT (name) DO NOTHING
+      rollback:
+        - sql:
+            sql: DELETE FROM bot.runtime_flags WHERE name = 'outbound_kill_switch'

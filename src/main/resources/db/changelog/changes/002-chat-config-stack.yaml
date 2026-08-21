@@ -1,0 +1,607 @@
+databaseChangeLog:
+  - changeSet:
+      id: chat-001-create-chat-configs
+      author: dev-team
+      preConditions:
+        - onFail: HALT
+        - tableExists:
+            tableName: channels
+            schemaName: tgscan
+        - not:
+            tableExists:
+              tableName: chat_configs
+      changes:
+        - createTable:
+            tableName: chat_configs
+            columns:
+              - column:
+                  name: id
+                  type: BIGSERIAL
+                  autoIncrement: true
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: channel_chat_id
+                  type: BIGINT
+                  constraints:
+                    nullable: false
+              - column:
+                  name: prompt_template
+                  type: TEXT
+              - column:
+                  name: enabled
+                  type: BOOLEAN
+                  defaultValueBoolean: false
+                  constraints:
+                    nullable: false
+              - column:
+                  name: max_tokens
+                  type: INTEGER
+              - column:
+                  name: temperature
+                  type: DOUBLE PRECISION
+              - column:
+                  name: max_daily_messages
+                  type: INTEGER
+              - column:
+                  name: current_daily_messages
+                  type: INTEGER
+                  defaultValueNumeric: 0
+                  constraints:
+                    nullable: false
+              - column:
+                  name: language
+                  type: VARCHAR(10)
+                  defaultValue: 'ru'
+              - column:
+                  name: context_window_size
+                  type: INTEGER
+                  defaultValueNumeric: 10
+                  constraints:
+                    nullable: false
+              - column:
+                  name: primary_channel_id
+                  type: BIGINT
+              - column:
+                  name: default_sync_depth_days
+                  type: INTEGER
+              - column:
+                  name: auto_sync_enabled
+                  type: BOOLEAN
+                  defaultValueBoolean: false
+              - column:
+                  name: sync_enabled
+                  type: BOOLEAN
+                  defaultValueBoolean: false
+                  constraints:
+                    nullable: false
+              - column:
+                  name: respond_to_forwarded_bot_messages
+                  type: BOOLEAN
+                  defaultValueBoolean: false
+                  constraints:
+                    nullable: false
+              - column:
+                  name: created_at
+                  type: TIMESTAMP WITH TIME ZONE
+                  defaultValueComputed: CURRENT_TIMESTAMP
+                  constraints:
+                    nullable: false
+        - addUniqueConstraint:
+            tableName: chat_configs
+            columnNames: channel_chat_id
+            constraintName: uq_chat_configs_channel
+        - addForeignKeyConstraint:
+            baseTableName: chat_configs
+            baseColumnNames: channel_chat_id
+            referencedTableSchemaName: tgscan
+            referencedTableName: channels
+            referencedColumnNames: id
+            constraintName: fk_chat_configs_channel
+            onDelete: CASCADE
+        - addForeignKeyConstraint:
+            baseTableName: chat_configs
+            baseColumnNames: primary_channel_id
+            referencedTableSchemaName: tgscan
+            referencedTableName: channels
+            referencedColumnNames: id
+            constraintName: fk_chat_configs_primary_channel
+            onDelete: SET NULL
+      rollback:
+        - dropTable:
+            tableName: chat_configs
+
+  - changeSet:
+      id: chat-002-create-context-settings
+      author: dev-team
+      preConditions:
+        - onFail: HALT
+        - tableExists:
+            tableName: chat_configs
+        - not:
+            tableExists:
+              tableName: context_settings
+      changes:
+        - createTable:
+            tableName: context_settings
+            columns:
+              - column:
+                  name: id
+                  type: BIGSERIAL
+                  autoIncrement: true
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: chat_config_id
+                  type: BIGINT
+                  constraints:
+                    nullable: false
+                    unique: true
+              - column:
+                  name: history_message_count
+                  type: INTEGER
+                  defaultValueNumeric: 10
+                  constraints:
+                    nullable: false
+              - column:
+                  name: history_time_window_hours
+                  type: INTEGER
+                  defaultValueNumeric: 24
+                  constraints:
+                    nullable: false
+              - column:
+                  name: include_user_context
+                  type: BOOLEAN
+                  defaultValueBoolean: true
+                  constraints:
+                    nullable: false
+              - column:
+                  name: include_media_descriptions
+                  type: BOOLEAN
+                  defaultValueBoolean: true
+                  constraints:
+                    nullable: false
+              - column:
+                  name: context_compression_enabled
+                  type: BOOLEAN
+                  defaultValueBoolean: false
+                  constraints:
+                    nullable: false
+              - column:
+                  name: max_context_tokens
+                  type: INTEGER
+                  defaultValueNumeric: 2000
+              - column:
+                  name: preserve_important_messages
+                  type: BOOLEAN
+                  defaultValueBoolean: true
+                  constraints:
+                    nullable: false
+        - addForeignKeyConstraint:
+            baseTableName: context_settings
+            baseColumnNames: chat_config_id
+            referencedTableName: chat_configs
+            referencedColumnNames: id
+            constraintName: fk_context_settings_chat_config
+            onDelete: CASCADE
+      rollback:
+        - dropTable:
+            tableName: context_settings
+
+  - changeSet:
+      id: chat-003-create-llm-parameters
+      author: dev-team
+      preConditions:
+        - onFail: HALT
+        - tableExists:
+            tableName: chat_configs
+        - not:
+            tableExists:
+              tableName: llm_parameters
+      changes:
+        - createTable:
+            tableName: llm_parameters
+            columns:
+              - column:
+                  name: id
+                  type: BIGSERIAL
+                  autoIncrement: true
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: chat_config_id
+                  type: BIGINT
+                  constraints:
+                    nullable: false
+                    unique: true
+              - column:
+                  name: model_name
+                  type: VARCHAR(100)
+                  defaultValue: 'deepseek-chat'
+              - column:
+                  name: temperature
+                  type: DOUBLE PRECISION
+                  defaultValueNumeric: 0.7
+              - column:
+                  name: max_tokens
+                  type: INTEGER
+                  defaultValueNumeric: 1000
+              - column:
+                  name: top_p
+                  type: DOUBLE PRECISION
+                  defaultValueNumeric: 0.9
+              - column:
+                  name: frequency_penalty
+                  type: DOUBLE PRECISION
+                  defaultValueNumeric: 0.0
+              - column:
+                  name: presence_penalty
+                  type: DOUBLE PRECISION
+                  defaultValueNumeric: 0.0
+              - column:
+                  name: system_prompt
+                  type: TEXT
+              - column:
+                  name: custom_instructions
+                  type: TEXT
+              - column:
+                  name: response_format
+                  type: VARCHAR(50)
+                  defaultValue: 'TEXT'
+        - addForeignKeyConstraint:
+            baseTableName: llm_parameters
+            baseColumnNames: chat_config_id
+            referencedTableName: chat_configs
+            referencedColumnNames: id
+            constraintName: fk_llm_parameters_chat_config
+            onDelete: CASCADE
+      rollback:
+        - dropTable:
+            tableName: llm_parameters
+
+  - changeSet:
+      id: chat-004-create-rate-limits
+      author: dev-team
+      preConditions:
+        - onFail: HALT
+        - tableExists:
+            tableName: chat_configs
+        - not:
+            tableExists:
+              tableName: rate_limits
+      changes:
+        - createTable:
+            tableName: rate_limits
+            columns:
+              - column:
+                  name: id
+                  type: BIGSERIAL
+                  autoIncrement: true
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: chat_config_id
+                  type: BIGINT
+                  constraints:
+                    nullable: false
+                    unique: true
+              - column:
+                  name: max_messages_per_minute
+                  type: INTEGER
+              - column:
+                  name: max_messages_per_hour
+                  type: INTEGER
+                  defaultValueNumeric: 20
+              - column:
+                  name: max_messages_per_day
+                  type: INTEGER
+                  defaultValueNumeric: 100
+              - column:
+                  name: max_tokens_per_day
+                  type: INTEGER
+                  defaultValueNumeric: 50000
+              - column:
+                  name: cooldown_after_limit_minutes
+                  type: INTEGER
+                  defaultValueNumeric: 60
+              - column:
+                  name: burst_limit
+                  type: INTEGER
+                  defaultValueNumeric: 3
+              - column:
+                  name: burst_window_seconds
+                  type: INTEGER
+                  defaultValueNumeric: 60
+              - column:
+                  name: user_specific_limits
+                  type: BOOLEAN
+                  defaultValueBoolean: false
+                  constraints:
+                    nullable: false
+        - addForeignKeyConstraint:
+            baseTableName: rate_limits
+            baseColumnNames: chat_config_id
+            referencedTableName: chat_configs
+            referencedColumnNames: id
+            constraintName: fk_rate_limits_chat_config
+            onDelete: CASCADE
+      rollback:
+        - dropTable:
+            tableName: rate_limits
+
+  - changeSet:
+      id: chat-005-create-response-templates
+      author: dev-team
+      preConditions:
+        - onFail: HALT
+        - tableExists:
+            tableName: chat_configs
+        - not:
+            tableExists:
+              tableName: response_templates
+      changes:
+        - createTable:
+            tableName: response_templates
+            columns:
+              - column:
+                  name: id
+                  type: BIGSERIAL
+                  autoIncrement: true
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: chat_config_id
+                  type: BIGINT
+                  constraints:
+                    nullable: false
+              - column:
+                  name: template_name
+                  type: VARCHAR(100)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: template_content
+                  type: TEXT
+                  constraints:
+                    nullable: false
+              - column:
+                  name: response_style
+                  type: VARCHAR(50)
+                  defaultValue: 'ADAPTIVE'
+              - column:
+                  name: response_tone
+                  type: VARCHAR(50)
+                  defaultValue: 'NEUTRAL'
+              - column:
+                  name: max_response_length
+                  type: INTEGER
+                  defaultValueNumeric: 500
+              - column:
+                  name: is_default
+                  type: BOOLEAN
+                  defaultValueBoolean: false
+                  constraints:
+                    nullable: false
+              - column:
+                  name: priority
+                  type: INTEGER
+                  defaultValueNumeric: 1
+                  constraints:
+                    nullable: false
+              - column:
+                  name: active
+                  type: BOOLEAN
+                  defaultValueBoolean: true
+                  constraints:
+                    nullable: false
+        - addForeignKeyConstraint:
+            baseTableName: response_templates
+            baseColumnNames: chat_config_id
+            referencedTableName: chat_configs
+            referencedColumnNames: id
+            constraintName: fk_response_templates_chat_config
+            onDelete: CASCADE
+        - createIndex:
+            tableName: response_templates
+            indexName: idx_response_templates_chat_config
+            columns:
+              - column:
+                  name: chat_config_id
+              - column:
+                  name: is_default
+      rollback:
+        - dropTable:
+            tableName: response_templates
+
+  - changeSet:
+      id: chat-006-create-trigger-conditions
+      author: dev-team
+      preConditions:
+        - onFail: HALT
+        - tableExists:
+            tableName: chat_configs
+        - not:
+            tableExists:
+              tableName: trigger_conditions
+      changes:
+        - createTable:
+            tableName: trigger_conditions
+            columns:
+              - column:
+                  name: id
+                  type: BIGSERIAL
+                  autoIncrement: true
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: chat_config_id
+                  type: BIGINT
+                  constraints:
+                    nullable: false
+              - column:
+                  name: condition_name
+                  type: VARCHAR(100)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: trigger_type
+                  type: VARCHAR(50)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: keywords
+                  type: TEXT
+              - column:
+                  name: mention_required
+                  type: BOOLEAN
+                  defaultValueBoolean: false
+                  constraints:
+                    nullable: false
+              - column:
+                  name: time_delay_seconds
+                  type: INTEGER
+                  defaultValueNumeric: 0
+                  constraints:
+                    nullable: false
+              - column:
+                  name: probability_percent
+                  type: INTEGER
+                  defaultValueNumeric: 100
+                  constraints:
+                    nullable: false
+              - column:
+                  name: active_hours_start
+                  type: TIME
+              - column:
+                  name: active_hours_end
+                  type: TIME
+              - column:
+                  name: active_days_of_week
+                  type: VARCHAR(50)
+                  defaultValue: '1,2,3,4,5,6,7'
+                  constraints:
+                    nullable: false
+              - column:
+                  name: minimum_gap_minutes
+                  type: INTEGER
+                  defaultValueNumeric: 0
+                  constraints:
+                    nullable: false
+              - column:
+                  name: priority
+                  type: INTEGER
+                  defaultValueNumeric: 1
+                  constraints:
+                    nullable: false
+              - column:
+                  name: active
+                  type: BOOLEAN
+                  defaultValueBoolean: true
+                  constraints:
+                    nullable: false
+              - column:
+                  name: response_length
+                  type: VARCHAR(20)
+                  defaultValue: 'MEDIUM'
+                  constraints:
+                    nullable: false
+        - addForeignKeyConstraint:
+            baseTableName: trigger_conditions
+            baseColumnNames: chat_config_id
+            referencedTableName: chat_configs
+            referencedColumnNames: id
+            constraintName: fk_trigger_conditions_chat_config
+            onDelete: CASCADE
+        - createIndex:
+            tableName: trigger_conditions
+            indexName: idx_trigger_conditions_chat_config
+            columns:
+              - column:
+                  name: chat_config_id
+              - column:
+                  name: active
+      rollback:
+        - dropTable:
+            tableName: trigger_conditions
+
+  - changeSet:
+      id: chat-007-create-topic-restrictions
+      author: dev-team
+      preConditions:
+        - onFail: HALT
+        - tableExists:
+            tableName: chat_configs
+        - not:
+            tableExists:
+              tableName: topic_restrictions
+      changes:
+        - createTable:
+            tableName: topic_restrictions
+            columns:
+              - column:
+                  name: id
+                  type: BIGSERIAL
+                  autoIncrement: true
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: chat_config_id
+                  type: BIGINT
+                  constraints:
+                    nullable: false
+              - column:
+                  name: restriction_name
+                  type: VARCHAR(100)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: restriction_type
+                  type: VARCHAR(50)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: keywords
+                  type: TEXT
+              - column:
+                  name: categories
+                  type: TEXT
+              - column:
+                  name: action_type
+                  type: VARCHAR(50)
+                  defaultValue: 'IGNORE'
+                  constraints:
+                    nullable: false
+              - column:
+                  name: custom_response
+                  type: TEXT
+              - column:
+                  name: active
+                  type: BOOLEAN
+                  defaultValueBoolean: true
+                  constraints:
+                    nullable: false
+        - addForeignKeyConstraint:
+            baseTableName: topic_restrictions
+            baseColumnNames: chat_config_id
+            referencedTableName: chat_configs
+            referencedColumnNames: id
+            constraintName: fk_topic_restrictions_chat_config
+            onDelete: CASCADE
+        - createIndex:
+            tableName: topic_restrictions
+            indexName: idx_topic_restrictions_chat_config
+            columns:
+              - column:
+                  name: chat_config_id
+              - column:
+                  name: active
+      rollback:
+        - dropTable:
+            tableName: topic_restrictions

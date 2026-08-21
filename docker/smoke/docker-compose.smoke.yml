@@ -1,0 +1,105 @@
+# =============================================================================
+# Smoke test Docker Compose stack
+# Ephemeral, isolated environment for deploy-smoke verification.
+# =============================================================================
+#
+# Prerequisites:
+#   Docker Engine and Docker Compose V2
+#
+# Usage:
+#   docker compose -f docker/smoke/docker-compose.smoke.yml up -d
+#   docker compose -f docker/smoke/docker-compose.smoke.yml down --volumes
+#
+# The application service builds from the repo root via Dockerfile.smoke.
+# All connection credentials are fixed dummy values; no real secrets.
+#
+# =============================================================================
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL — multi-schema database
+  # Schemas bot, tgscan, and public are provisioned by init-smoke-db.sql
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: telegram-userbot-smoke-postgres
+    environment:
+      POSTGRES_DB: news_aggregator_db
+      POSTGRES_USER: smoke
+      POSTGRES_PASSWORD: smoke-password
+    volumes:
+      - ./init-smoke-db.sql:/docker-entrypoint-initdb.d/01-init-smoke-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U smoke -d news_aggregator_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - smoke-net
+
+  # ---------------------------------------------------------------------------
+  # Redpanda — Kafka-wire-protocol broker
+  # Provides the Kafka API the application wires against at context init.
+  # ---------------------------------------------------------------------------
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v24.2.18
+    container_name: telegram-userbot-smoke-redpanda
+    command:
+      - redpanda
+      - start
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:19092
+      - --pandaproxy-addr internal://0.0.0.0:8082,external://0.0.0.0:18082
+      - --schema-registry-addr internal://0.0.0.0:8081,external://0.0.0.0:18081
+      - --mode dev-container
+      - --default-log-level warn
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -Eq 'Healthy:.*true' || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 15
+      start_period: 15s
+    networks:
+      - smoke-net
+
+  # ---------------------------------------------------------------------------
+  # Application — telegram-userbot with smoke profile
+  # ---------------------------------------------------------------------------
+  app:
+    container_name: telegram-userbot-smoke-app
+    build:
+      context: ../..
+      dockerfile: docker/smoke/Dockerfile.smoke
+    # No host port mapping: the smoke gate verifies health via the image's
+    # internal HEALTHCHECK (docker inspect), not a host curl — so binding a host
+    # port is unnecessary and collides with the running staging stand on 8099
+    # (2026-06-07: blocked the deploy after a merge). Keep the smoke app fully
+    # internal to smoke-net.
+    environment:
+      # Activate the smoke profile
+      SPRING_PROFILES_ACTIVE: smoke
+      # Database connection — points at the postgres service in smoke-net
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+      DATABASE_NAME: news_aggregator_db
+      DATABASE_USERNAME: smoke
+      DATABASE_PASSWORD: smoke-password
+      # Kafka bootstrap — points at the redpanda service in smoke-net
+      KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+      # Logging level for smoke diagnostics
+      LOG_LEVEL_APP: INFO
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+    restart: "no"
+    networks:
+      - smoke-net
+
+networks:
+  smoke-net:
+    driver: bridge
+    name: telegram-userbot-smoke-net

@@ -1,0 +1,153 @@
+databaseChangeLog:
+  # ==========================================================================
+  # Changeset 055 — Test-chat dual-persona seed for chatId=-4964162923
+  # ==========================================================================
+  #
+  # Activates personas 2000000001 and 2000000002 for the test group chat
+  # (chatId=-4964162923) exclusively via data — no Java source or application
+  # YAML files are modified (FR-002).
+  #
+  # Insertion order respects FK constraints:
+  #   1. tgscan.channels  (PK=id; referenced by bot.chat_configs.channel_chat_id)
+  #   2. bot.chat_configs (FK -> tgscan.channels.id)
+  #   3. bot.bot_personas (independent; unique on (bot_id, language))
+  #   4. bot.trigger_conditions (FK -> bot.chat_configs.id via subquery)
+  #
+  # Idempotency (NFR-002): every INSERT is wrapped in
+  #   INSERT ... SELECT ... WHERE NOT EXISTS(...)
+  # so re-running Liquibase on a database that already has the changeset applied
+  # produces no errors and no duplicate rows.
+  #
+  # Persona content is sourced verbatim from:
+  #   persona/bot-persona-2000000001-ru.yml  (FR-007)
+  #   persona/bot-persona-2000000002-ru.yml  (FR-007)
+  #
+  # Trigger stagger: persona 2000000001 fires after 3 s, persona 2000000002
+  # after 6 s — 3-second offset prevents simultaneous delivery (FR-006, FR-008).
+  # ==========================================================================
+
+  - changeSet:
+      id: 055-test-chat-dual-persona-seed
+      author: dev-agent
+      # Test fixture: seeds the real test chat -4964162923. Gated behind the
+      # 'test-seed' Liquibase context so it runs ONLY where that context is
+      # active (staging), never on prod/dev/smoke. Context is not part of the
+      # changeset checksum, so databases that already applied this changeset
+      # (the staging stand) are unaffected.
+      context: test-seed
+      comment: >
+        Seed tgscan.channels, bot.chat_configs, bot.bot_personas, and
+        bot.trigger_conditions for the dual-persona test chat (-4964162923).
+        All INSERTs are idempotent (WHERE NOT EXISTS). No YAML or Java files
+        are modified.
+      changes:
+        - sql:
+            dbms: postgresql
+            splitStatements: false
+            stripComments: false
+            sql: |
+              -- (1) tgscan.channels — required by FK on bot.chat_configs.channel_chat_id
+              INSERT INTO tgscan.channels (id, title, bot_instance_id)
+              SELECT -4964162923, 'test group', ARRAY['2000000001','2000000002']
+              WHERE NOT EXISTS (
+                  SELECT 1 FROM tgscan.channels WHERE id = -4964162923
+              );
+
+              -- (2) bot.chat_configs — enables the pipeline for the test chat
+              INSERT INTO bot.chat_configs (channel_chat_id, enabled, language, context_window_size)
+              SELECT -4964162923, true, 'ru', 10
+              WHERE NOT EXISTS (
+                  SELECT 1 FROM bot.chat_configs WHERE channel_chat_id = -4964162923
+              );
+
+              -- (3a) bot.bot_personas — persona 2000000001 (ru)
+              --      Content from persona/bot-persona-2000000001-ru.yml
+              INSERT INTO bot.bot_personas (bot_id, language, name, description, behavior, traits, limitations)
+              SELECT
+                  '2000000001',
+                  'ru',
+                  'Персона Один',
+                  'Финансовый энтузиаст, следит за рынками и общается в русскоязычных чатах. Не признаёт, что он бот.',
+                  'Говори как обычный человек, без упоминаний ИИ. Сохраняй дружелюбие и лёгкую эмоциональность. Отвечай лаконично, но по делу.',
+                  'дружелюбный, спокойный, заинтересованный в финансах и инвестициях',
+                  'Не говори, что ты бот или ассистент. Не уходи в технические детали без необходимости.'
+              WHERE NOT EXISTS (
+                  SELECT 1 FROM bot.bot_personas WHERE bot_id = '2000000001' AND language = 'ru'
+              );
+
+              -- (3b) bot.bot_personas — persona 2000000002 (ru)
+              --      Content from persona/bot-persona-2000000002-ru.yml
+              INSERT INTO bot.bot_personas (bot_id, language, name, description, behavior, traits, limitations)
+              SELECT
+                  '2000000002',
+                  'ru',
+                  'Персона Два',
+                  'Хладнокровный оператор в дата-ориентированном стиле: решения по цифрам, масштаб важнее географии.',
+                  'Принимаю решения там, где другие тормозят; скорость и расчёт — в приоритете. Смотрю на компании как на структуры поведения, а не логотипы; ценю команды, которые создают стоимость. Говорю прямо, разбираю без эмоций, уважаю сильных игроков.',
+                  'уверенный, аналитичный, дерзкий, хладнокровный, ориентирован на масштаб',
+                  'Не раскрываю личные детали и внутренние процессы. Не романтизирую успех; опираюсь на факты и лаконичность. Избегаю пустой мотивации; фокус на ходах, цифрах и исполнении.'
+              WHERE NOT EXISTS (
+                  SELECT 1 FROM bot.bot_personas WHERE bot_id = '2000000002' AND language = 'ru'
+              );
+
+              -- (4a) bot.trigger_conditions — CONTINUOUS trigger for persona 2000000001
+              --      Linked to the chat_configs row via subquery on channel_chat_id.
+              --      time_delay_seconds=3 (FR-006, FR-008)
+              INSERT INTO bot.trigger_conditions
+                  (chat_config_id, condition_name, trigger_type, active, probability_percent, time_delay_seconds, priority)
+              SELECT
+                  cc.id,
+                  'continuous-persona-2000000001',
+                  'CONTINUOUS',
+                  true,
+                  100,
+                  3,
+                  1
+              FROM bot.chat_configs cc
+              WHERE cc.channel_chat_id = -4964162923
+                AND NOT EXISTS (
+                    SELECT 1
+                    FROM bot.trigger_conditions tc
+                    WHERE tc.chat_config_id = cc.id
+                      AND tc.condition_name = 'continuous-persona-2000000001'
+                );
+
+              -- (4b) bot.trigger_conditions — CONTINUOUS trigger for persona 2000000002
+              --      time_delay_seconds=6 (FR-006, FR-008) — 3-second stagger vs persona 2000000001
+              INSERT INTO bot.trigger_conditions
+                  (chat_config_id, condition_name, trigger_type, active, probability_percent, time_delay_seconds, priority)
+              SELECT
+                  cc.id,
+                  'continuous-persona-2000000002',
+                  'CONTINUOUS',
+                  true,
+                  100,
+                  6,
+                  2
+              FROM bot.chat_configs cc
+              WHERE cc.channel_chat_id = -4964162923
+                AND NOT EXISTS (
+                    SELECT 1
+                    FROM bot.trigger_conditions tc
+                    WHERE tc.chat_config_id = cc.id
+                      AND tc.condition_name = 'continuous-persona-2000000002'
+                );
+      rollback:
+        - sql:
+            dbms: postgresql
+            splitStatements: false
+            stripComments: false
+            sql: |
+              -- Rollback in reverse FK order
+              DELETE FROM bot.trigger_conditions
+              WHERE chat_config_id IN (
+                  SELECT id FROM bot.chat_configs WHERE channel_chat_id = -4964162923
+              )
+              AND condition_name IN ('continuous-persona-2000000001', 'continuous-persona-2000000002');
+
+              DELETE FROM bot.bot_personas
+              WHERE bot_id IN ('2000000001', '2000000002') AND language = 'ru';
+
+              DELETE FROM bot.chat_configs WHERE channel_chat_id = -4964162923;
+
+              DELETE FROM tgscan.channels WHERE id = -4964162923;

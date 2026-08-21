@@ -1,0 +1,32 @@
+databaseChangeLog:
+  - changeSet:
+      id: create-bot-schema
+      author: system
+      preConditions:
+        - onFail: MARK_RAN
+        - not:
+            - sqlCheck:
+                expectedResult: 1
+                sql: SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name = 'bot'
+      changes:
+        - sql:
+            sql: CREATE SCHEMA IF NOT EXISTS bot
+      rollback:
+        - sql:
+            sql: DROP SCHEMA IF EXISTS bot CASCADE
+
+  - changeSet:
+      id: create-tgscan-schema
+      author: system
+      preConditions:
+        - onFail: MARK_RAN
+        - not:
+            - sqlCheck:
+                expectedResult: 1
+                sql: SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name = 'tgscan'
+      changes:
+        - sql:
+            sql: CREATE SCHEMA IF NOT EXISTS tgscan
+      rollback:
+        - sql:
+            sql: DROP SCHEMA IF EXISTS tgscan CASCADE

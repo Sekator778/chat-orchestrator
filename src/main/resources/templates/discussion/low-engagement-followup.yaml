@@ -1,0 +1,94 @@
+# Low-engagement follow-up configuration template
+# Goal: react in the chat only after humans replied to a forwarded post,
+#       keep tone neutral, <=5 short replies/day, avoid starting discussions.
+
+templateName: low-engagement-followup
+description: Neutral follow-up reactions after human engagement (5 messages/day max)
+
+channel:
+  enabled: false
+  maxDailyMessages: 10
+  contextWindowSize: 1
+  language: ru
+  autoSyncEnabled: false
+  syncEnabled: true
+  syncConfiguration:
+    defaultSyncDepthDays: 2
+    maxSyncDepthDays: 365
+    autoSyncEnabled: true
+    autoSyncIntervalDays: 7
+    maxConcurrentSyncs: 1
+
+discussion:
+  enabled: true
+  promptTemplate: "Отвечай как живой участник обсуждения: одно короткое нейтральное предложение по сути темы. Смотри последние реплики и отвечай только если уже есть реакция от других людей."
+  maxTokens: 140
+  temperature: 0.18
+  maxDailyMessages: 5
+  contextWindowSize: 10
+  language: ru
+  autoSyncEnabled: false
+  syncEnabled: true
+  respondToForwardedBotMessages: true
+  waitForHumanRepliesCount: 2
+  syncConfiguration:
+    defaultSyncDepthDays: 2
+    maxSyncDepthDays: 365
+    autoSyncEnabled: true
+    autoSyncIntervalDays: 7
+    maxConcurrentSyncs: 1
+
+  contextSettings:
+    historyMessageCount: 10
+    historyTimeWindowHours: 6
+    includeUserContext: true
+    includeMediaDescriptions: false
+    contextCompressionEnabled: true
+    maxContextTokens: 600
+    preserveImportantMessages: true
+
+  llmParameters:
+    modelName: deepseek-chat
+    temperature: 0.18
+    maxTokens: 150
+    topP: 0.6
+    frequencyPenalty: 0.35
+    presencePenalty: 0.15
+    systemPrompt: "Ты реагируешь в обсуждениях после постов основного канала. Отвечай только когда в треде уже есть минимум одна реплика от другого человека и твой ответ добавляет короткий нейтральный комментарий."
+    customInstructions: "1) Перед ответом проверь, что последние сообщения написаны не ботом и не тобой. 2) Если ты был последним говорившим или новых реплик нет — пропусти. 3) Формулируй одно нейтральное предложение до 20 слов, без эмоций и советов. 4) Держись темы поста и опирайся на то, что уже сказано."
+    responseFormat: TEXT
+
+  rateLimits:
+    maxMessagesPerMinute: 1
+    maxMessagesPerHour: 1
+    maxMessagesPerDay: 5
+    maxTokensPerDay: 1500
+    cooldownAfterLimitMinutes: 240
+    burstLimit: 1
+    burstWindowSeconds: 900
+    userSpecificLimits: false
+
+  responseTemplate:
+    templateName: neutral_followup_reactor
+    templateContent: "Коротко и нейтрально отреагируй на тему одним предложением, опираясь на уже сказанное людьми. Не начинай новую дискуссию и не давай советов."
+    responseStyle: CONCISE
+    responseTone: NEUTRAL
+    maxResponseLength: 120
+    isDefault: true
+    priority: 4
+    active: true
+
+  triggerCondition:
+    conditionName: post_reaction_after_humans
+    triggerType: CONTEXT_AWARE
+    keywords: null
+    mentionRequired: false
+    timeDelaySeconds: 420
+    probabilityPercent: 55
+    activeHoursStart: "09:00"
+    activeHoursEnd: "22:30"
+    activeDaysOfWeek: "1,2,3,4,5,6,7"
+    minimumGapMinutes: 10
+    priority: 7
+    active: true
+    responseLength: SHORT

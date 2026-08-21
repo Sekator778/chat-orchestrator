@@ -1,0 +1,56 @@
+databaseChangeLog:
+  # =================================================================
+  # LLM token usage capture: add prompt/completion/total_tokens
+  # columns to bot.llm_queries so that per-call cost can be tracked.
+  # Usage values are populated by LlmCallService when the provider
+  # returns a UsageInfo object; null means the provider omitted it.
+  # Enforcement/budget gates are NOT included here — see backlog 5.2.
+  # =================================================================
+
+  - changeSet:
+      id: 2026-06-13-llm-query-usage
+      author: claude-agent
+      comment: "Add prompt_tokens, completion_tokens, total_tokens to bot.llm_queries for LLM cost capture"
+      preConditions:
+        - onFail: MARK_RAN
+        - not:
+            - columnExists:
+                schemaName: bot
+                tableName: llm_queries
+                columnName: prompt_tokens
+      changes:
+        - addColumn:
+            schemaName: bot
+            tableName: llm_queries
+            columns:
+              - column:
+                  name: prompt_tokens
+                  type: INT
+                  constraints:
+                    nullable: true
+                  remarks: "Number of prompt tokens consumed in this LLM call; null if provider did not return usage"
+              - column:
+                  name: completion_tokens
+                  type: INT
+                  constraints:
+                    nullable: true
+                  remarks: "Number of completion tokens produced in this LLM call; null if provider did not return usage"
+              - column:
+                  name: total_tokens
+                  type: INT
+                  constraints:
+                    nullable: true
+                  remarks: "Total tokens (prompt + completion) for this LLM call; null if provider did not return usage"
+      rollback:
+        - dropColumn:
+            schemaName: bot
+            tableName: llm_queries
+            columnName: prompt_tokens
+        - dropColumn:
+            schemaName: bot
+            tableName: llm_queries
+            columnName: completion_tokens
+        - dropColumn:
+            schemaName: bot
+            tableName: llm_queries
+            columnName: total_tokens

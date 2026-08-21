@@ -1,0 +1,31 @@
+databaseChangeLog:
+  - changeSet:
+      id: 052-proactive-engagements
+      author: dev
+      comment: "Proactive engagement schedule: one message per day per persona per chat"
+      changes:
+        - sql:
+            sql: |
+              CREATE TABLE IF NOT EXISTS bot.proactive_engagements (
+                  id               BIGSERIAL PRIMARY KEY,
+                  chat_id          BIGINT        NOT NULL,
+                  bot_instance_id  VARCHAR(64)   NOT NULL,
+                  language         VARCHAR(8)    NOT NULL DEFAULT 'ru',
+                  send_hour_utc    SMALLINT      NOT NULL DEFAULT 15
+                                   CONSTRAINT chk_proactive_hour CHECK (send_hour_utc BETWEEN 0 AND 23),
+                  last_anchor_message_id BIGINT,
+                  last_sent_at     TIMESTAMPTZ,
+                  enabled          BOOLEAN       NOT NULL DEFAULT TRUE,
+                  created_at       TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+                  updated_at       TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
+                  CONSTRAINT uq_proactive_chat_persona UNIQUE (chat_id, bot_instance_id)
+              );
+
+              COMMENT ON TABLE  bot.proactive_engagements IS 'One proactive message per day per persona per chat';
+              COMMENT ON COLUMN bot.proactive_engagements.send_hour_utc         IS '0-23 UTC hour when the daily message is eligible to be sent';
+              COMMENT ON COLUMN bot.proactive_engagements.last_anchor_message_id IS 'Max message_id in bot.messages at the moment of last send; skip if nothing newer';
+              COMMENT ON COLUMN bot.proactive_engagements.last_sent_at          IS 'Timestamp of last successful proactive send';
+
+              CREATE INDEX IF NOT EXISTS idx_proactive_due
+                  ON bot.proactive_engagements (send_hour_utc, last_sent_at)
+                  WHERE enabled = TRUE;

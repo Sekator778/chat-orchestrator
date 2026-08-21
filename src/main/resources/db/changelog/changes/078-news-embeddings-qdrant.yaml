@@ -1,0 +1,20 @@
+databaseChangeLog:
+  - changeSet:
+      id: 078-news-embeddings-qdrant
+      author: claude
+      comment: >-
+        News embedding spine (Track A, Phase A1).
+        (1) embedded_at TIMESTAMPTZ on bot.messages — nullable; marks rows whose
+        vector has been upserted into Qdrant. NULL = not yet embedded; non-null =
+        embedded_at timestamp. A sparse index on (id WHERE embedded_at IS NULL)
+        makes incremental batch queries fast.
+        (2) app_settings knobs: news.embedding.{enabled(false), batch-size(200),
+        interval-ms(120000)}. All ON CONFLICT DO NOTHING — idempotent re-runs.
+        Persona-matching integration (the cosine blend in the candidate query)
+        is a separate follow-on task (A-T3).
+      changes:
+        - sqlFile:
+            path: ../sql/078-news-embeddings-qdrant.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false

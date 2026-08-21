@@ -1,0 +1,93 @@
+# Minimal reaction configuration template (simple style)
+# Goal: Simple, short emotional reactions (max 8 messages/day)
+
+templateName: standalone-minimal-reaction-template
+description: Simple short reactions with light emotion (8 messages/day max)
+
+channel:
+  enabled: false
+  maxDailyMessages: 10
+  contextWindowSize: 1
+  language: ru
+  autoSyncEnabled: false
+  syncEnabled: true
+  syncConfiguration:
+    defaultSyncDepthDays: 2
+    maxSyncDepthDays: 365
+    autoSyncEnabled: true
+    autoSyncIntervalDays: 7
+    maxConcurrentSyncs: 1
+
+discussion:
+  enabled: true
+  promptTemplate: "Ты должен реагировать как обычный человек: одно короткое предложение с лёгкой эмоцией, без аналитики и фактов."
+  maxTokens: 120
+  temperature: 0.35
+  maxDailyMessages: 2
+  contextWindowSize: 10
+  language: ru
+  autoSyncEnabled: false
+  syncEnabled: true
+  respondToForwardedBotMessages: false
+  waitForHumanRepliesCount: 2
+  syncConfiguration:
+    defaultSyncDepthDays: 2
+    maxSyncDepthDays: 365
+    autoSyncEnabled: true
+    autoSyncIntervalDays: 7
+    maxConcurrentSyncs: 1
+
+  contextSettings:
+    historyMessageCount: 4
+    historyTimeWindowHours: 2
+    includeUserContext: false
+    includeMediaDescriptions: false
+    contextCompressionEnabled: true
+    maxContextTokens: 400
+    preserveImportantMessages: true
+
+  llmParameters:
+    modelName: deepseek-chat
+    temperature: 0.35
+    maxTokens: 160
+    topP: 0.7
+    frequencyPenalty: 0.2
+    presencePenalty: 0.1
+    systemPrompt: "Ты реагируешь как живой участник: одно короткое предложение с лёгкой эмоцией, без аналитики и ссылок."
+    customInstructions: "Если добавить нечего — ответь \"Ок.\" или пропусти."
+    responseFormat: TEXT
+
+  rateLimits:
+    maxMessagesPerMinute: 1
+    maxMessagesPerHour: 2
+    maxMessagesPerDay: 2
+    maxTokensPerDay: 1500
+    cooldownAfterLimitMinutes: 120
+    burstLimit: 1
+    burstWindowSeconds: 180
+    userSpecificLimits: false
+
+  responseTemplate:
+    templateName: simple_chat_response_template_short_reaction
+    templateContent: "Дай короткую человеческую реакцию с лёгкой эмоцией, без аналитики и ссылок."
+    responseStyle: CONCISE
+    responseTone: CASUAL
+    maxResponseLength: 120
+    isDefault: true
+    priority: 3
+    active: true
+
+  triggerCondition:
+    conditionName: simple_chat_trigger_simple_reaction
+    triggerType: CONTEXT_AWARE
+    keywords: null
+    mentionRequired: false
+    timeDelaySeconds: 65
+    probabilityPercent: 99
+    activeHoursStart: "09:00"
+    activeHoursEnd: "22:00"
+    activeDaysOfWeek: "1,2,3,4,5,6,7"
+    minimumGapMinutes: 0
+    priority: 5
+    active: true
+    responseLength: SHORT

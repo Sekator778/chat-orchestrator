@@ -1,0 +1,64 @@
+databaseChangeLog:
+  - changeSet:
+      id: 2025-12-11-bot-personas
+      author: codex
+      changes:
+        - createTable:
+            tableName: bot_personas
+            schemaName: bot
+            columns:
+              - column:
+                  name: id
+                  type: BIGSERIAL
+                  constraints:
+                    primaryKey: true
+              - column:
+                  name: bot_id
+                  type: VARCHAR(64)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: language
+                  type: VARCHAR(8)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: name
+                  type: TEXT
+                  constraints:
+                    nullable: false
+              - column:
+                  name: description
+                  type: TEXT
+                  constraints:
+                    nullable: false
+              - column:
+                  name: behavior
+                  type: TEXT
+              - column:
+                  name: traits
+                  type: TEXT
+              - column:
+                  name: limitations
+                  type: TEXT
+              - column:
+                  name: metadata
+                  type: JSONB
+              - column:
+                  name: created_at
+                  type: TIMESTAMPTZ
+                  defaultValueDate: CURRENT_TIMESTAMP
+              - column:
+                  name: updated_at
+                  type: TIMESTAMPTZ
+                  defaultValueDate: CURRENT_TIMESTAMP
+        - createIndex:
+            indexName: uq_bot_personas_bot_lang
+            tableName: bot_personas
+            schemaName: bot
+            unique: true
+            columns:
+              - column:
+                  name: bot_id
+              - column:
+                  name: language

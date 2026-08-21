@@ -1,0 +1,11 @@
+databaseChangeLog:
+  - changeSet:
+      id: 016-channel-scoring
+      author: codex
+      comment: "Channel scoring v1: metrics columns, scoring function, and debug view"
+      changes:
+        - sqlFile:
+            path: ../sql/016-channel-scoring.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false

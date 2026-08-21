@@ -1,0 +1,18 @@
+databaseChangeLog:
+  - changeSet:
+      id: 082-seed-daily-post-probability
+      author: claude
+      comment: >-
+        Seed news.proactive-posting.daily-post-probability = 0.5 (double) into
+        bot.app_settings (cs082). Controls the per-day coin-flip gate added to
+        ProactiveNewsPostingService.processPersona: each (persona, chat) pair
+        draws a stable seeded random once per UTC day; if the draw is >= this
+        probability the persona stays silent that day.
+        Default 0.5 = post on ~50% of days.
+        ON CONFLICT (name) DO NOTHING — idempotent.
+      changes:
+        - sqlFile:
+            path: ../sql/082-seed-daily-post-probability.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false

@@ -1,0 +1,37 @@
+databaseChangeLog:
+  # =================================================================
+  # F1.5 — News-channel history backfill tracking.
+  # Adds backfilled_at to tgscan.channels so the scheduler knows
+  # which channels have already had their history pulled.
+  # =================================================================
+
+  - changeSet:
+      id: 2026-06-13-channel-backfilled
+      author: claude-agent
+      comment: "Add backfilled_at column to tgscan.channels to track news-channel history backfill status"
+      preConditions:
+        - onFail: MARK_RAN
+        - not:
+            - columnExists:
+                schemaName: tgscan
+                tableName: channels
+                columnName: backfilled_at
+      changes:
+        - addColumn:
+            tableName: channels
+            schemaName: tgscan
+            columns:
+              - column:
+                  name: backfilled_at
+                  type: TIMESTAMPTZ
+                  remarks: >-
+                    Timestamp when this channel's message history was last bulk-backfilled
+                    by NewsChannelBackfillScheduler into bot.messages. NULL means not yet
+                    backfilled. Used to pick the next channel to process (one per run).
+                  constraints:
+                    nullable: true
+      rollback:
+        - dropColumn:
+            tableName: channels
+            schemaName: tgscan
+            columnName: backfilled_at

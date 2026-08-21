@@ -1,0 +1,17 @@
+databaseChangeLog:
+  - changeSet:
+      id: 072-unified-ranking-brain
+      author: claude
+      comment: >-
+        Unified ranking brain (Variant B — floored multiplicative formula).
+        Removes the old additive trigger (bot.messages_calculate_importance)
+        whose channel-weight and consensus/novelty inputs were never populated.
+        Introduces bot.fn_recompute_importance() reading all coefficients from
+        bot.app_settings via helper functions fn_setting_num/fn_setting_bool.
+        Seeds 10 knob rows. Backfills importance immediately on deploy.
+      changes:
+        - sqlFile:
+            path: ../sql/072-unified-ranking-brain.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false

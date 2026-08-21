@@ -1,0 +1,78 @@
+databaseChangeLog:
+  - changeSet:
+      id: 2026-06-10-telegram-accounts-table
+      author: claude
+      changes:
+        - createTable:
+            tableName: telegram_accounts
+            schemaName: bot
+            remarks: >-
+              Registry of real Telegram accounts the application runs (one TDLight
+              session per row). Source of truth for account identity/state; secrets
+              (api_id/api_hash) deliberately stay in configuration, not in the DB.
+            columns:
+              - column:
+                  name: id
+                  type: BIGSERIAL
+                  constraints:
+                    primaryKey: true
+              - column:
+                  name: bot_id
+                  type: VARCHAR(64)
+                  remarks: Matches telegram.accounts[].bot-id and bot_personas.bot_id
+                  constraints:
+                    nullable: false
+                    unique: true
+                    uniqueConstraintName: uq_telegram_accounts_bot_id
+              - column:
+                  name: name
+                  type: TEXT
+              - column:
+                  name: phone_number
+                  type: VARCHAR(32)
+              - column:
+                  name: telegram_user_id
+                  type: BIGINT
+                  remarks: Real Telegram user id, filled once known after authorization
+              - column:
+                  name: is_collector
+                  type: BOOLEAN
+                  defaultValueBoolean: false
+                  remarks: Exactly one account harvests news channels into the shared knowledge base
+                  constraints:
+                    nullable: false
+              - column:
+                  name: status
+                  type: VARCHAR(32)
+                  defaultValue: ACTIVE
+                  constraints:
+                    nullable: false
+              - column:
+                  name: sessions_directory
+                  type: TEXT
+              - column:
+                  name: created_at
+                  type: TIMESTAMPTZ
+                  defaultValueDate: CURRENT_TIMESTAMP
+              - column:
+                  name: updated_at
+                  type: TIMESTAMPTZ
+                  defaultValueDate: CURRENT_TIMESTAMP
+
+  # NOTE: no FK from bot_personas.bot_id yet — personas are still inserted at
+  # runtime (admin API, YAML seeding) without a guaranteed account row; the FK
+  # lands together with the identifier unification (backlog 2.6). Until then the
+  # registrar service converges the registry at startup.
+  - changeSet:
+      id: 2026-06-10-telegram-accounts-seed-from-personas
+      author: claude
+      remarks: Backfill registry rows for every bot_id already referenced by personas, so existing databases start consistent.
+      changes:
+        - sql:
+            sql: |
+              INSERT INTO bot.telegram_accounts (bot_id)
+              SELECT DISTINCT bot_id FROM bot.bot_personas
+              ON CONFLICT (bot_id) DO NOTHING
+      rollback:
+        - sql:
+            sql: SELECT 1

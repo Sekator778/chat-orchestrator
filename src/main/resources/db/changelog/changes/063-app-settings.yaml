@@ -1,0 +1,61 @@
+databaseChangeLog:
+  - changeSet:
+      id: 2026-06-10-app-settings-table
+      author: claude
+      changes:
+        - createTable:
+            tableName: app_settings
+            schemaName: bot
+            remarks: >-
+              Owner control plane for runtime-tunable application behavior.
+              Key/value: every operational knob lives here as a row instead of
+              an env var or compiled-in default, so behavior changes flexibly
+              without a redeploy. Read through a TTL cache (AppSettingsService),
+              not per-message I/O. value_type/description are for the operator;
+              the app parses value with a safe fallback when a row is absent.
+            columns:
+              - column:
+                  name: name
+                  type: VARCHAR(80)
+                  constraints:
+                    primaryKey: true
+              - column:
+                  name: value
+                  type: TEXT
+                  constraints:
+                    nullable: false
+              - column:
+                  name: value_type
+                  type: VARCHAR(16)
+                  remarks: bool | int | long | double | string (advisory, for operators/UI)
+              - column:
+                  name: description
+                  type: TEXT
+              - column:
+                  name: updated_at
+                  type: TIMESTAMPTZ
+                  defaultValueDate: CURRENT_TIMESTAMP
+
+  - changeSet:
+      id: 2026-06-10-app-settings-seed-dispatch
+      author: claude
+      changes:
+        - sql:
+            # Seeded to match the current staging behavior exactly, so deploying
+            # this changeset changes nothing until the owner edits a row.
+            sql: |
+              INSERT INTO bot.app_settings (name, value, value_type, description) VALUES
+                ('bindings.enabled', 'true', 'bool',
+                 'Dispatch candidates come from bot.persona_chat_bindings (per-persona chat membership); chats without bindings fall back to the legacy channel bot_instance_id array.'),
+                ('responders.per_persona_decision_enabled', 'true', 'bool',
+                 'No responder cap: each bound persona decides for itself whether to chime in, by its own reply_probability. Reply count is emergent (0..N). When false, the legacy max_per_message cap is used instead.'),
+                ('responders.default_reply_probability', '0.5', 'double',
+                 'Reply chance for a persona whose persona_chat_bindings row has no explicit reply_probability. Raise toward 1.0 so a chat''s main/only persona answers reliably (the 1->1 guarantee); lower it to thin out crowded chats.'),
+                ('responders.max_per_message', '1', 'int',
+                 'Legacy hard cap on how many personas may answer one message. Used ONLY when responders.per_persona_decision_enabled = false. 0 disables the cap.')
+              ON CONFLICT (name) DO NOTHING
+      rollback:
+        - sql:
+            sql: |
+              DELETE FROM bot.app_settings WHERE name IN
+                ('bindings.enabled','responders.per_persona_decision_enabled','responders.default_reply_probability','responders.max_per_message')

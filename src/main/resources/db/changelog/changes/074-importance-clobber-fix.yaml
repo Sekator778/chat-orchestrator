@@ -1,0 +1,20 @@
+databaseChangeLog:
+  - changeSet:
+      id: 074-importance-clobber-fix
+      author: claude
+      comment: >-
+        Fix dual-writer clobber on bot.messages.importance introduced by changeset 024.
+        Changeset 024 retargeted tgscan.fn_recalc_importance() to UPDATE bot.messages
+        (with the old additive formula), creating a conflict with the #109 Variant B
+        brain (bot.fn_recompute_importance). ScoringRefreshScheduledJob was overwriting
+        the Variant B results every hour. Fix: redefine fn_recalc_importance() to target
+        tgscan.messages (its original pre-024 target) using the correct column names
+        (channel_id, posted_at). bot.messages.importance is now the sole domain of
+        bot.fn_recompute_importance. Immediately backfills bot.messages.importance with
+        correct Variant B values after deploy.
+      changes:
+        - sqlFile:
+            path: ../sql/074-importance-clobber-fix.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false

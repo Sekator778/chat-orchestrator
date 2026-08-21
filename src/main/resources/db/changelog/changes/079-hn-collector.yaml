@@ -1,0 +1,24 @@
+databaseChangeLog:
+  - changeSet:
+      id: 079-hn-collector
+      author: claude
+      comment: >-
+        Hacker News collector — normalization-contract template (Track B3).
+        (1) tgscan.channels row for HN: id=-8000000001 (platform band -8_000_000_001,
+        distinct from TG basic groups and web-RSS -9_000_000_001..-9_999_999_999),
+        title='Hacker News', is_channel=true, subscribers=2000 (just above the 1000-gate;
+        intentionally small so penetration=views/subscribers stays meaningful for HN
+        engagement magnitudes — 50000 would crush it to authority_floor),
+        outlet_trust=NULL (intentional: HN ranks via real engagement — views=score,
+        forwards=comments — using the normal authority/quality path in
+        fn_recompute_importance; a non-null outlet_trust would route through the
+        web flat-trust path and bypass engagement-based ranking).
+        (2) app_settings knobs (value_type column, NOT type):
+        hn-collector.enabled=false(bool), hn-collector.interval-ms=600000(int),
+        hn-collector.max-stories=30(int). All ON CONFLICT DO NOTHING — idempotent.
+      changes:
+        - sqlFile:
+            path: ../sql/079-hn-collector.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false

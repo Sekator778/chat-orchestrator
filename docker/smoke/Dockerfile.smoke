@@ -1,0 +1,57 @@
+# =============================================================================
+# Multi-stage Dockerfile for the smoke profile
+# Stage 1: Build the application JAR with the TDLight linux_amd64_gnu_ssl3 classifier
+# Stage 2: Slim JRE 21 runtime image
+#
+# Built by docker-compose.smoke.yml or manually:
+#   docker build -f docker/smoke/Dockerfile.smoke \
+#     --build-arg TD_LIGHT_CLASSIFIER=linux_amd64_gnu_ssl3 \
+#     -t telegram-userbot-smoke .
+# =============================================================================
+
+# Stage 1 — Maven build
+FROM maven:3.9-eclipse-temurin-21 AS builder
+WORKDIR /build
+
+# TDLight native classifier for the runtime image (Ubuntu jammy = glibc + OpenSSL 3).
+# NOTE: the bare "linux_amd64" is NOT a published classifier — the tdlight-natives
+# BOM only manages linux_amd64_gnu_ssl3 / _gnu_ssl1 / _clang_ssl3, so a bare value
+# fails Maven validation with "version is missing". Override if the base image's
+# libc/OpenSSL differ (e.g. _gnu_ssl1 for OpenSSL 1.1 bases).
+ARG TD_LIGHT_CLASSIFIER=linux_amd64_gnu_ssl3
+
+# Copy POM and resolve dependencies first (layer caching)
+COPY pom.xml .
+RUN mvn dependency:go-offline -B -Dtdlight.native.classifier=${TD_LIGHT_CLASSIFIER}
+
+# Copy source and build the JAR with the Linux classifier
+COPY src ./src
+RUN mvn package -DskipTests -B -Dtdlight.native.classifier=${TD_LIGHT_CLASSIFIER}
+
+# Stage 2 — Slim JRE runtime
+FROM eclipse-temurin:21-jre-jammy AS runtime
+
+# Install OS-level dependencies required by TDLight native libraries, plus curl
+# for the container HEALTHCHECK below (the jre-jammy base ships no curl).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libc6 \
+    libstdc++6 \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy the built JAR from the builder stage
+COPY --from=builder /build/target/*.jar app.jar
+
+# Default port for the application
+EXPOSE 8099
+
+# Healthcheck using the Actuator health endpoint
+HEALTHCHECK --interval=10s --timeout=5s --retries=3 \
+    CMD curl -f http://localhost:8099/actuator/health || exit 1
+
+# Spring Boot application entry point
+# Profile and connection settings are injected via environment variables
+# by docker-compose.smoke.yml
+ENTRYPOINT ["java", "-jar", "app.jar"]

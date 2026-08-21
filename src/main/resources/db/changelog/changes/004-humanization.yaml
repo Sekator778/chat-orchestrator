@@ -1,0 +1,396 @@
+databaseChangeLog:
+  - changeSet:
+      id: human-001-create-response-variations
+      author: dev-team
+      preConditions:
+        - onFail: HALT
+        - not:
+            tableExists:
+              tableName: response_variations
+      changes:
+        - createTable:
+            tableName: response_variations
+            columns:
+              - column:
+                  name: id
+                  type: BIGSERIAL
+                  autoIncrement: true
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: intent_type
+                  type: VARCHAR(50)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: communication_style
+                  type: VARCHAR(50)
+              - column:
+                  name: template_text
+                  type: TEXT
+                  constraints:
+                    nullable: false
+              - column:
+                  name: emotional_tone
+                  type: VARCHAR(50)
+              - column:
+                  name: formality_level
+                  type: INTEGER
+              - column:
+                  name: response_length
+                  type: VARCHAR(20)
+              - column:
+                  name: usage_count
+                  type: BIGINT
+                  defaultValueNumeric: 0
+                  constraints:
+                    nullable: false
+              - column:
+                  name: last_used_at
+                  type: TIMESTAMP WITH TIME ZONE
+              - column:
+                  name: enabled
+                  type: BOOLEAN
+                  defaultValueBoolean: true
+                  constraints:
+                    nullable: false
+              - column:
+                  name: weight
+                  type: INTEGER
+                  defaultValueNumeric: 10
+                  constraints:
+                    nullable: false
+              - column:
+                  name: requires_context
+                  type: BOOLEAN
+                  defaultValueBoolean: false
+                  constraints:
+                    nullable: false
+              - column:
+                  name: created_at
+                  type: TIMESTAMP WITH TIME ZONE
+                  defaultValueComputed: CURRENT_TIMESTAMP
+                  constraints:
+                    nullable: false
+        - createIndex:
+            tableName: response_variations
+            indexName: idx_response_variations_intent
+            columns:
+              - column:
+                  name: intent_type
+        - createIndex:
+            tableName: response_variations
+            indexName: idx_response_variations_style
+            columns:
+              - column:
+                  name: communication_style
+        - createIndex:
+            tableName: response_variations
+            indexName: idx_response_variations_enabled
+            columns:
+              - column:
+                  name: enabled
+      rollback:
+        - dropTable:
+            tableName: response_variations
+
+  - changeSet:
+      id: human-002-create-user-communication-profiles
+      author: dev-team
+      preConditions:
+        - onFail: HALT
+        - tableExists:
+            tableName: users
+        - not:
+            tableExists:
+              tableName: user_communication_profiles
+      changes:
+        - createTable:
+            tableName: user_communication_profiles
+            columns:
+              - column:
+                  name: id
+                  type: BIGSERIAL
+                  autoIncrement: true
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: user_id
+                  type: BIGINT
+                  constraints:
+                    nullable: false
+                    unique: true
+              - column:
+                  name: avg_message_length
+                  type: INTEGER
+              - column:
+                  name: formality_level
+                  type: INTEGER
+              - column:
+                  name: emoticon_usage_frequency
+                  type: DOUBLE PRECISION
+              - column:
+                  name: punctuation_style
+                  type: VARCHAR(20)
+              - column:
+                  name: response_speed_preference
+                  type: VARCHAR(20)
+              - column:
+                  name: vocabulary_complexity
+                  type: INTEGER
+              - column:
+                  name: uses_slang
+                  type: BOOLEAN
+                  defaultValueBoolean: false
+                  constraints:
+                    nullable: false
+              - column:
+                  name: uses_abbreviations
+                  type: BOOLEAN
+                  defaultValueBoolean: false
+                  constraints:
+                    nullable: false
+              - column:
+                  name: typical_greeting_style
+                  type: VARCHAR(100)
+              - column:
+                  name: most_active_time
+                  type: VARCHAR(20)
+              - column:
+                  name: conversation_length_preference
+                  type: VARCHAR(20)
+              - column:
+                  name: emotional_expressiveness
+                  type: INTEGER
+              - column:
+                  name: humor_appreciation
+                  type: BOOLEAN
+                  defaultValueBoolean: true
+                  constraints:
+                    nullable: false
+              - column:
+                  name: prefers_direct_communication
+                  type: BOOLEAN
+                  defaultValueBoolean: false
+                  constraints:
+                    nullable: false
+              - column:
+                  name: message_sample_count
+                  type: BIGINT
+                  defaultValueNumeric: 0
+                  constraints:
+                    nullable: false
+              - column:
+                  name: confidence_score
+                  type: DOUBLE PRECISION
+                  defaultValueNumeric: 0.0
+                  constraints:
+                    nullable: false
+              - column:
+                  name: last_updated_at
+                  type: TIMESTAMP WITH TIME ZONE
+                  defaultValueComputed: CURRENT_TIMESTAMP
+                  constraints:
+                    nullable: false
+              - column:
+                  name: created_at
+                  type: TIMESTAMP WITH TIME ZONE
+                  defaultValueComputed: CURRENT_TIMESTAMP
+                  constraints:
+                    nullable: false
+        - addForeignKeyConstraint:
+            baseTableName: user_communication_profiles
+            baseColumnNames: user_id
+            referencedTableName: users
+            referencedColumnNames: id
+            constraintName: fk_user_profiles_user
+            onDelete: CASCADE
+      rollback:
+        - dropTable:
+            tableName: user_communication_profiles
+
+  - changeSet:
+      id: human-003-seed-response-variations
+      author: dev-team
+      preConditions:
+        - onFail: HALT
+        - tableExists:
+            tableName: response_variations
+      changes:
+        - insert:
+            tableName: response_variations
+            columns:
+              - column:
+                  name: intent_type
+                  value: BOT_DENIAL
+              - column:
+                  name: communication_style
+                  value: CASUAL
+              - column:
+                  name: template_text
+                  value: "Дивне питання! А чому ти запитуєш?"
+              - column:
+                  name: emotional_tone
+                  value: confused
+              - column:
+                  name: formality_level
+                  valueNumeric: 2
+              - column:
+                  name: weight
+                  valueNumeric: 15
+        - insert:
+            tableName: response_variations
+            columns:
+              - column:
+                  name: intent_type
+                  value: BOT_DENIAL
+              - column:
+                  name: communication_style
+                  value: FRIENDLY
+              - column:
+                  name: template_text
+                  value: "Хм, а я схожий на бота? 😄"
+              - column:
+                  name: emotional_tone
+                  value: playful
+              - column:
+                  name: formality_level
+                  valueNumeric: 2
+              - column:
+                  name: weight
+                  valueNumeric: 15
+        - insert:
+            tableName: response_variations
+            columns:
+              - column:
+                  name: intent_type
+                  value: BOT_DENIAL
+              - column:
+                  name: communication_style
+                  value: HUMOROUS
+              - column:
+                  name: template_text
+                  value: "А ти що, перевіряєш мене? 😏"
+              - column:
+                  name: emotional_tone
+                  value: playful
+              - column:
+                  name: formality_level
+                  valueNumeric: 2
+              - column:
+                  name: weight
+                  valueNumeric: 15
+        - insert:
+            tableName: response_variations
+            columns:
+              - column:
+                  name: intent_type
+                  value: GREETING
+              - column:
+                  name: communication_style
+                  value: CASUAL
+              - column:
+                  name: template_text
+                  value: "Привіт! Як справи?"
+              - column:
+                  name: emotional_tone
+                  value: friendly
+              - column:
+                  name: formality_level
+                  valueNumeric: 2
+        - insert:
+            tableName: response_variations
+            columns:
+              - column:
+                  name: intent_type
+                  value: GREETING
+              - column:
+                  name: communication_style
+                  value: FRIENDLY
+              - column:
+                  name: template_text
+                  value: "Привіт-привіт! Як дела? 😊"
+              - column:
+                  name: emotional_tone
+                  value: enthusiastic
+              - column:
+                  name: formality_level
+                  valueNumeric: 2
+        - insert:
+            tableName: response_variations
+            columns:
+              - column:
+                  name: intent_type
+                  value: ACKNOWLEDGMENT
+              - column:
+                  name: communication_style
+                  value: CASUAL
+              - column:
+                  name: template_text
+                  value: "Ага, ясно"
+              - column:
+                  name: emotional_tone
+                  value: neutral
+              - column:
+                  name: formality_level
+                  valueNumeric: 2
+        - insert:
+            tableName: response_variations
+            columns:
+              - column:
+                  name: intent_type
+                  value: ACKNOWLEDGMENT
+              - column:
+                  name: communication_style
+                  value: FRIENDLY
+              - column:
+                  name: template_text
+                  value: "Оке, все зрозуміло 👍"
+              - column:
+                  name: emotional_tone
+                  value: positive
+              - column:
+                  name: formality_level
+                  valueNumeric: 2
+        - insert:
+            tableName: response_variations
+            columns:
+              - column:
+                  name: intent_type
+                  value: DEFLECTION
+              - column:
+                  name: communication_style
+                  value: CASUAL
+              - column:
+                  name: template_text
+                  value: "А давай краще про щось інше поговоримо?"
+              - column:
+                  name: emotional_tone
+                  value: deflective
+              - column:
+                  name: formality_level
+                  valueNumeric: 2
+        - insert:
+            tableName: response_variations
+            columns:
+              - column:
+                  name: intent_type
+                  value: DEFLECTION
+              - column:
+                  name: communication_style
+                  value: CASUAL
+              - column:
+                  name: template_text
+                  value: "Хм, цікаво... А ти як думаєш?"
+              - column:
+                  name: emotional_tone
+                  value: curious
+              - column:
+                  name: formality_level
+                  valueNumeric: 2
+      rollback:
+        - delete:
+            tableName: response_variations
+            where: "intent_type IN ('BOT_DENIAL','GREETING','ACKNOWLEDGMENT','DEFLECTION')"

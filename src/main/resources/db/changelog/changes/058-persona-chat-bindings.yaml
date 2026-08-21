@@ -1,0 +1,74 @@
+databaseChangeLog:
+  - changeSet:
+      id: 2026-06-10-persona-chat-bindings-table
+      author: claude
+      changes:
+        - createTable:
+            tableName: persona_chat_bindings
+            schemaName: bot
+            remarks: >-
+              Which persona lives in which chat (the vision: each persona has its
+              OWN set of chats). Replaces tgscan.channels.bot_instance_id TEXT[]
+              as the dispatch source; per-(persona, chat) setting overrides land
+              here in later increments.
+            columns:
+              - column:
+                  name: id
+                  type: BIGSERIAL
+                  constraints:
+                    primaryKey: true
+              - column:
+                  name: bot_id
+                  type: VARCHAR(64)
+                  remarks: Matches telegram_accounts.bot_id / bot_personas.bot_id
+                  constraints:
+                    nullable: false
+              - column:
+                  name: chat_id
+                  type: BIGINT
+                  constraints:
+                    nullable: false
+              - column:
+                  name: reply_enabled
+                  type: BOOLEAN
+                  defaultValueBoolean: true
+                  constraints:
+                    nullable: false
+              - column:
+                  name: created_at
+                  type: TIMESTAMPTZ
+                  defaultValueDate: CURRENT_TIMESTAMP
+              - column:
+                  name: updated_at
+                  type: TIMESTAMPTZ
+                  defaultValueDate: CURRENT_TIMESTAMP
+        - addUniqueConstraint:
+            tableName: persona_chat_bindings
+            schemaName: bot
+            columnNames: bot_id, chat_id
+            constraintName: uq_persona_chat_bindings_bot_chat
+        - createIndex:
+            indexName: idx_persona_chat_bindings_chat
+            tableName: persona_chat_bindings
+            schemaName: bot
+            columns:
+              - column:
+                  name: chat_id
+
+  - changeSet:
+      id: 2026-06-10-persona-chat-bindings-seed
+      author: claude
+      remarks: Seed bindings from the legacy per-channel bot_instance_id arrays so existing dispatch behavior carries over unchanged.
+      changes:
+        - sql:
+            sql: |
+              INSERT INTO bot.persona_chat_bindings (bot_id, chat_id)
+              SELECT DISTINCT trim(unnested.bot_id), c.id
+                FROM tgscan.channels c,
+                     LATERAL unnest(c.bot_instance_id) AS unnested(bot_id)
+               WHERE unnested.bot_id IS NOT NULL
+                 AND trim(unnested.bot_id) <> ''
+              ON CONFLICT (bot_id, chat_id) DO NOTHING
+      rollback:
+        - sql:
+            sql: SELECT 1

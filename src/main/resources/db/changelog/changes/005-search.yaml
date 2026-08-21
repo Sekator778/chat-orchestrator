@@ -1,0 +1,229 @@
+databaseChangeLog:
+  - changeSet:
+      id: search-001-create-search-configs
+      author: dev-team
+      preConditions:
+        - onFail: HALT
+        - not:
+            tableExists:
+              tableName: search_configs
+      changes:
+        - createTable:
+            tableName: search_configs
+            columns:
+              - column:
+                  name: id
+                  type: BIGSERIAL
+                  autoIncrement: true
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: chat_id
+                  type: BIGINT
+                  constraints:
+                    nullable: false
+                    unique: true
+              - column:
+                  name: search_enabled
+                  type: BOOLEAN
+                  defaultValueBoolean: false
+                  constraints:
+                    nullable: false
+              - column:
+                  name: auto_search_enabled
+                  type: BOOLEAN
+                  defaultValueBoolean: false
+                  constraints:
+                    nullable: false
+              - column:
+                  name: search_provider
+                  type: VARCHAR(50)
+                  defaultValue: 'GOOGLE'
+                  constraints:
+                    nullable: false
+              - column:
+                  name: max_results
+                  type: INTEGER
+                  defaultValueNumeric: 5
+                  constraints:
+                    nullable: false
+              - column:
+                  name: cache_duration_minutes
+                  type: INTEGER
+                  defaultValueNumeric: 60
+                  constraints:
+                    nullable: false
+              - column:
+                  name: rate_limit_per_hour
+                  type: INTEGER
+                  defaultValueNumeric: 30
+                  constraints:
+                    nullable: false
+              - column:
+                  name: include_attribution
+                  type: BOOLEAN
+                  defaultValueBoolean: true
+                  constraints:
+                    nullable: false
+              - column:
+                  name: relevance_threshold
+                  type: DECIMAL(3,2)
+                  defaultValueNumeric: 0.6
+                  constraints:
+                    nullable: false
+              - column:
+                  name: search_triggers
+                  type: TEXT
+      rollback:
+        - dropTable:
+            tableName: search_configs
+
+  - changeSet:
+      id: search-002-create-search-results
+      author: dev-team
+      preConditions:
+        - onFail: HALT
+        - not:
+            tableExists:
+              tableName: search_results
+      changes:
+        - createTable:
+            tableName: search_results
+            columns:
+              - column:
+                  name: id
+                  type: BIGSERIAL
+                  autoIncrement: true
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: query_hash
+                  type: VARCHAR(64)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: original_query
+                  type: TEXT
+                  constraints:
+                    nullable: false
+              - column:
+                  name: normalized_query
+                  type: TEXT
+                  constraints:
+                    nullable: false
+              - column:
+                  name: search_provider
+                  type: VARCHAR(50)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: results_json
+                  type: TEXT
+                  constraints:
+                    nullable: false
+              - column:
+                  name: total_results
+                  type: BIGINT
+                  constraints:
+                    nullable: false
+              - column:
+                  name: search_time_ms
+                  type: BIGINT
+                  constraints:
+                    nullable: false
+              - column:
+                  name: relevance_score
+                  type: DECIMAL(3,2)
+              - column:
+                  name: created_at
+                  type: TIMESTAMP WITH TIME ZONE
+                  defaultValueComputed: CURRENT_TIMESTAMP
+                  constraints:
+                    nullable: false
+              - column:
+                  name: expires_at
+                  type: TIMESTAMP WITH TIME ZONE
+                  constraints:
+                    nullable: false
+              - column:
+                  name: access_count
+                  type: INTEGER
+                  defaultValueNumeric: 0
+                  constraints:
+                    nullable: false
+              - column:
+                  name: last_accessed_at
+                  type: TIMESTAMP WITH TIME ZONE
+        - createIndex:
+            tableName: search_results
+            indexName: idx_search_results_query_hash
+            columns:
+              - column:
+                  name: query_hash
+        - createIndex:
+            tableName: search_results
+            indexName: idx_search_results_created_at
+            columns:
+              - column:
+                  name: created_at
+        - createIndex:
+            tableName: search_results
+            indexName: idx_search_results_expires_at
+            columns:
+              - column:
+                  name: expires_at
+        - createIndex:
+            tableName: search_results
+            indexName: idx_search_results_provider_created
+            columns:
+              - column:
+                  name: search_provider
+              - column:
+                  name: created_at
+      rollback:
+        - dropTable:
+            tableName: search_results
+
+  - changeSet:
+      id: search-003-add-constraints
+      author: dev-team
+      preConditions:
+        - onFail: HALT
+        - tableExists:
+            tableName: search_configs
+      changes:
+        - sql:
+            sql: |
+              ALTER TABLE search_configs ADD CONSTRAINT chk_search_configs_max_results CHECK (max_results BETWEEN 1 AND 20);
+              ALTER TABLE search_configs ADD CONSTRAINT chk_search_configs_cache_duration CHECK (cache_duration_minutes BETWEEN 1 AND 1440);
+              ALTER TABLE search_configs ADD CONSTRAINT chk_search_configs_rate_limit CHECK (rate_limit_per_hour BETWEEN 1 AND 1000);
+              ALTER TABLE search_configs ADD CONSTRAINT chk_search_configs_relevance_threshold CHECK (relevance_threshold >= 0.0 AND relevance_threshold <= 1.0);
+      rollback:
+        - sql:
+            sql: |
+              ALTER TABLE search_configs DROP CONSTRAINT IF EXISTS chk_search_configs_max_results;
+              ALTER TABLE search_configs DROP CONSTRAINT IF EXISTS chk_search_configs_cache_duration;
+              ALTER TABLE search_configs DROP CONSTRAINT IF EXISTS chk_search_configs_rate_limit;
+              ALTER TABLE search_configs DROP CONSTRAINT IF EXISTS chk_search_configs_relevance_threshold;
+
+  - changeSet:
+      id: search-004-add-results-constraints
+      author: dev-team
+      preConditions:
+        - onFail: HALT
+        - tableExists:
+            tableName: search_results
+      changes:
+        - sql:
+            sql: |
+              ALTER TABLE search_results ADD CONSTRAINT chk_search_results_relevance_score CHECK (relevance_score IS NULL OR (relevance_score >= 0.0 AND relevance_score <= 1.0));
+              ALTER TABLE search_results ADD CONSTRAINT chk_search_results_access_count CHECK (access_count >= 0);
+              ALTER TABLE search_results ADD CONSTRAINT chk_search_results_expiry CHECK (expires_at > created_at);
+      rollback:
+        - sql:
+            sql: |
+              ALTER TABLE search_results DROP CONSTRAINT IF EXISTS chk_search_results_relevance_score;
+              ALTER TABLE search_results DROP CONSTRAINT IF EXISTS chk_search_results_access_count;
+              ALTER TABLE search_results DROP CONSTRAINT IF EXISTS chk_search_results_expiry;

@@ -1,0 +1,55 @@
+databaseChangeLog:
+  # =====================================================================
+  # Changeset 054 — Composite index for channel activity report query
+  # =====================================================================
+  # Adds idx_messages_chat_date_activity on bot.messages(chat_id, date DESC).
+  #
+  # Rationale (ADR-001):
+  #   - The activity report query performs a window range-scan on (chat_id, date)
+  #     and sorts by date DESC (FR-008 / ORDER BY lastActivityAt DESC NULLS LAST).
+  #   - Two ascending (chat_id, date) indexes already exist:
+  #       * idx_messages_chat_date       — changeset 003, no explicit schemaName
+  #       * idx_messages_chat_date_asc   — changeset 028, schemaName: bot
+  #   - This index uses date DESC to be non-redundant while aligning with the
+  #     query's access pattern.  The planner may use the existing ascending index
+  #     for the window predicate; the DESC variant aids the ORDER BY.
+  #
+  # Constraints (FR-011, NFR-002):
+  #   - Pure additive DDL: one createIndex, no DROP/ALTER/TRUNCATE/DML.
+  #   - schemaName: bot guarantees schema-qualified resolution.
+  #
+  # FR-012: registered as the last entry in db.changelog-master.yaml after 053.
+  # =====================================================================
+
+  - changeSet:
+      id: 054-channel-activity-report-index
+      author: dev-agent
+      comment: >
+        Add (chat_id, date DESC) composite index on bot.messages to support
+        the channel activity report aggregate query (FR-011, NFR-001).
+        date DESC aligns with ORDER BY lastActivityAt DESC NULLS LAST (FR-008)
+        and is non-redundant with the existing ascending indexes from changesets
+        003 and 028.
+      preConditions:
+        - onFail: HALT
+        - not:
+            - indexExists:
+                schemaName: bot
+                tableName: messages
+                indexName: idx_messages_chat_date_activity
+      changes:
+        - createIndex:
+            indexName: idx_messages_chat_date_activity
+            schemaName: bot
+            tableName: messages
+            columns:
+              - column:
+                  name: chat_id
+              - column:
+                  name: date
+                  descending: true
+      rollback:
+        - dropIndex:
+            schemaName: bot
+            tableName: messages
+            indexName: idx_messages_chat_date_activity

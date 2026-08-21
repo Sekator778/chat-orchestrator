@@ -1,0 +1,7 @@
+# Local secret-scan guard. Install once with:  pre-commit install
+# Then gitleaks runs automatically on every `git commit`.
+repos:
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks

@@ -1,0 +1,59 @@
+# =============================================================================
+# Smoke profile — Ephemeral Deploy-Smoke Harness
+# Activated via SPRING_PROFILES_ACTIVE=smoke
+# =============================================================================
+# This profile overrides application.yml defaults so the application starts
+# completely headless — no Telegram client, no real LLM calls, no startup
+# hooks that reach a live client.
+#
+# Connection values (spring.r2dbc.url, spring.liquibase.url,
+# spring.kafka.bootstrap-servers) are inherited from application.yml and
+# overridden by environment variables set in docker-compose.smoke.yml.
+#
+# =============================================================================
+
+# FR-002: Disable Telegram client config so TelegramClientConfig is not loaded
+# and no IllegalStateException is thrown at context init.
+telegram:
+  client:
+    enabled: false
+
+# FR-005: Placeholder DeepSeek credentials — no real API calls during smoke
+deepseek:
+  apiKey: smoke-placeholder
+  apiUrl: http://smoke-placeholder.local/not-found
+
+# FR-004: Disable all client-reaching startup hooks and schedulers
+startup:
+  sync:
+    enabled: false
+
+scheduler:
+  chat-discovery:
+    enabled: false
+
+events:
+  watcher:
+    enabled: false
+  publisher:
+    enabled: false
+
+python:
+  scheduler:
+    enabled: false
+
+pipeline:
+  observability:
+    enabled: false
+
+pending-response:
+  scheduler:
+    enabled: false
+
+digest:
+  scheduler:
+    enabled: false
+
+proactive:
+  engagement:
+    enabled: false

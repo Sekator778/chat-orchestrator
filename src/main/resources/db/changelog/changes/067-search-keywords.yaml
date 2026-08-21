@@ -1,0 +1,100 @@
+databaseChangeLog:
+  # =================================================================
+  # Keyword-driven channel discovery: creates tgscan.search_keywords
+  # and seeds a finance/economics/crypto set in Russian and English.
+  # The collector account uses these keywords with TDLib SearchPublicChats
+  # to find candidate channels it is not yet a member of.
+  # =================================================================
+
+  - changeSet:
+      id: 2026-06-13-search-keywords
+      author: claude-agent
+      comment: "Create tgscan.search_keywords table for keyword-driven channel discovery"
+      preConditions:
+        - onFail: MARK_RAN
+        - not:
+            - tableExists:
+                schemaName: tgscan
+                tableName: search_keywords
+      changes:
+        - createTable:
+            schemaName: tgscan
+            tableName: search_keywords
+            remarks: "Keywords used by the collector account to discover new channels via TDLib SearchPublicChats"
+            columns:
+              - column:
+                  name: id
+                  type: BIGSERIAL
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: keyword
+                  type: VARCHAR(255)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: language
+                  type: VARCHAR(8)
+                  constraints:
+                    nullable: true
+              - column:
+                  name: enabled
+                  type: BOOLEAN
+                  defaultValueBoolean: true
+                  constraints:
+                    nullable: false
+              - column:
+                  name: created_at
+                  type: TIMESTAMPTZ
+                  defaultValueComputed: now()
+                  constraints:
+                    nullable: false
+      rollback:
+        - dropTable:
+            schemaName: tgscan
+            tableName: search_keywords
+
+  - changeSet:
+      id: 2026-06-13-search-keywords-seed
+      author: claude-agent
+      comment: "Seed tgscan.search_keywords with RU+EN finance/economics/crypto keywords"
+      changes:
+        - sql:
+            sql: |
+              INSERT INTO tgscan.search_keywords (keyword, language, enabled) VALUES
+                ('экономика',      'ru', true),
+                ('финансы',        'ru', true),
+                ('инвестиции',     'ru', true),
+                ('хедж-фонды',     'ru', true),
+                ('криптовалюта',   'ru', true),
+                ('биткоин',        'ru', true),
+                ('трейдинг',       'ru', true),
+                ('биржа',          'ru', true),
+                ('фондовый рынок', 'ru', true),
+                ('акции',          'ru', true),
+                ('облигации',      'ru', true),
+                ('форекс',         'ru', true),
+                ('finance',        'en', true),
+                ('economics',      'en', true),
+                ('investing',      'en', true),
+                ('hedge funds',    'en', true),
+                ('cryptocurrency', 'en', true),
+                ('bitcoin',        'en', true),
+                ('trading',        'en', true),
+                ('stock market',   'en', true),
+                ('stocks',         'en', true),
+                ('bonds',          'en', true),
+                ('forex',          'en', true),
+                ('markets',        'en', true)
+              ON CONFLICT DO NOTHING
+      rollback:
+        - sql:
+            sql: |
+              DELETE FROM tgscan.search_keywords
+              WHERE keyword IN (
+                'экономика','финансы','инвестиции','хедж-фонды','криптовалюта',
+                'биткоин','трейдинг','биржа','фондовый рынок','акции','облигации','форекс',
+                'finance','economics','investing','hedge funds','cryptocurrency','bitcoin',
+                'trading','stock market','stocks','bonds','forex','markets'
+              )

@@ -1,0 +1,89 @@
+databaseChangeLog:
+  # =================================================================
+  # Automatic source_trust Synchronization from channels.weight
+  # =================================================================
+  # Problem: source_trust table was created but never populated.
+  # The DigestGenerationService uses source_trust for filtering messages
+  # by trust threshold, but all queries return defaults because table is empty.
+  #
+  # Solution: Create a trigger that automatically syncs channels.weight
+  # to source_trust.trust_score when weight is calculated.
+  # =================================================================
+
+  - changeSet:
+      id: 048-create-sync-source-trust-function
+      author: dev-team
+      comment: "Create function to sync channel weight to source_trust table"
+      changes:
+        - sql:
+            comment: "Create sync function for source_trust"
+            splitStatements: false
+            sql: |
+              CREATE OR REPLACE FUNCTION tgscan.fn_sync_source_trust()
+              RETURNS TRIGGER LANGUAGE plpgsql AS $BODY$
+              BEGIN
+                IF NEW.weight IS NOT NULL AND (OLD.weight IS NULL OR NEW.weight <> OLD.weight) THEN
+                  INSERT INTO tgscan.source_trust (channel_id, trust_score, last_updated)
+                  VALUES (NEW.id, NEW.weight, NOW())
+                  ON CONFLICT (channel_id) DO UPDATE
+                  SET
+                    trust_score = EXCLUDED.trust_score,
+                    last_updated = NOW()
+                  WHERE
+                    tgscan.source_trust.manual_override = FALSE;
+                END IF;
+                RETURN NEW;
+              END;
+              $BODY$;
+
+  - changeSet:
+      id: 048-create-source-trust-trigger
+      author: dev-team
+      comment: "Create trigger to automatically sync weight to source_trust"
+      changes:
+        - sql:
+            comment: "Create trigger on channels weight update"
+            sql: |
+              DROP TRIGGER IF EXISTS trg_sync_source_trust ON tgscan.channels;
+
+              CREATE TRIGGER trg_sync_source_trust
+              AFTER INSERT OR UPDATE OF weight ON tgscan.channels
+              FOR EACH ROW
+              EXECUTE FUNCTION tgscan.fn_sync_source_trust();
+
+  - changeSet:
+      id: 048-initial-source-trust-population
+      author: dev-team
+      comment: "Populate source_trust with existing channel weights (one-time migration)"
+      changes:
+        - sql:
+            comment: "Insert existing channel weights into source_trust"
+            sql: |
+              -- Populate source_trust from existing channels with weight
+              INSERT INTO tgscan.source_trust (channel_id, trust_score, last_updated)
+              SELECT
+                id AS channel_id,
+                weight AS trust_score,
+                NOW() AS last_updated
+              FROM tgscan.channels
+              WHERE weight IS NOT NULL
+              ON CONFLICT (channel_id) DO UPDATE
+              SET
+                trust_score = EXCLUDED.trust_score,
+                last_updated = NOW()
+              WHERE
+                tgscan.source_trust.manual_override = FALSE;
+
+  - changeSet:
+      id: 048-add-source-trust-index
+      author: dev-team
+      comment: "Add index for efficient trust score queries"
+      changes:
+        - createIndex:
+            schemaName: tgscan
+            tableName: source_trust
+            indexName: idx_source_trust_score
+            columns:
+              - column:
+                  name: trust_score
+                  descending: true

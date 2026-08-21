@@ -1,0 +1,15 @@
+databaseChangeLog:
+  - changeSet:
+      id: 071-message-value-score
+      author: claude
+      comment: "Add value_score column to bot.messages. MessageEntity maps it (@ReadOnlyProperty @Column value_score) since #83, but no migration ever created the column — so every DERIVED full-entity read (e.g. findByChatIdAndDateAfterOrderByDateAsc, used by the decision gate's message-context load) failed with BadSqlGrammar and the gate fell open. Column is nullable and never written by the ORM; ranking value is projected as an alias in the digest query, so existing rows stay NULL harmlessly."
+      changes:
+        - addColumn:
+            tableName: messages
+            schemaName: bot
+            columns:
+              - column:
+                  name: value_score
+                  type: double precision
+                  constraints:
+                    nullable: true

@@ -1,0 +1,21 @@
+databaseChangeLog:
+  - changeSet:
+      id: 077-web-trust-ranking
+      author: claude
+      comment: >-
+        Web-trust ranking brain (T4 of "web as co-equal collector" epic).
+        Extends bot.fn_recompute_importance() so web outlet rows
+        (tgscan.channels.outlet_trust IS NOT NULL, added in cs076) get a
+        meaningful importance score: authority = outlet_trust, quality =
+        web-collector.quality-floor (configurable knob, default 0.4).
+        Telegram channels (outlet_trust IS NULL) follow the EXACT 075
+        code path — COALESCE(NULL, auth.authority)=auth.authority and the
+        CASE picks the Wilson+penetration branch — so TG importance is
+        byte-for-byte unchanged. Applied to both the size-term-enabled and
+        default branches. Triggers an immediate recompute on deploy.
+      changes:
+        - sqlFile:
+            path: ../sql/077-web-trust-ranking.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false

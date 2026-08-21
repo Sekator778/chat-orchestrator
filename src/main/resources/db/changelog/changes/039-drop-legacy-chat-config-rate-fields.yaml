@@ -1,0 +1,19 @@
+databaseChangeLog:
+  - changeSet:
+      id: 039-drop-legacy-chat-config-rate-fields
+      author: codex
+      comment: "Stage 2: remove legacy rate-limit fields from bot.chat_configs (moved to bot.rate_limits)."
+      changes:
+        - dropColumn:
+            schemaName: bot
+            tableName: chat_configs
+            columnName: max_daily_messages
+        - dropColumn:
+            schemaName: bot
+            tableName: chat_configs
+            columnName: current_daily_messages
+        - dropColumn:
+            schemaName: bot
+            tableName: chat_configs
+            columnName: pending_response_delay_seconds
+

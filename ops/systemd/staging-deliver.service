@@ -1,0 +1,13 @@
+# Installed by ops/install-staging-timer.sh (placeholders substituted at install time).
+[Unit]
+Description=chat-orchestrator staging deliver (poll origin/main -> build -> smoke gate -> deploy)
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=__USER__
+WorkingDirectory=__REPO_DIR__
+ExecStart=__REPO_DIR__/scripts/staging-watch.sh
+# deliver builds + runs containers; give it room
+TimeoutStartSec=1800

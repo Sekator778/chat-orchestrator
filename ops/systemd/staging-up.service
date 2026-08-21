@@ -1,0 +1,16 @@
+# Installed by ops/install-staging-timer.sh (placeholders substituted at install time).
+# Brings the whole staging stand up (pg + kafka + qdrant + the N-account app) using
+# the last-built image and the saved sessions. Idempotent: `up -d` is a no-op if
+# already running. Updates on new commits are handled separately by staging-deliver.
+[Unit]
+Description=chat-orchestrator staging stand — bring the full stack up
+After=docker.service network-online.target
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=__USER__
+WorkingDirectory=__REPO_DIR__
+ExecStart=__DOCKER__ compose --env-file docker/staging/.env.staging -f docker/staging/docker-compose.staging.yml up -d --force-recreate app
+TimeoutStartSec=900

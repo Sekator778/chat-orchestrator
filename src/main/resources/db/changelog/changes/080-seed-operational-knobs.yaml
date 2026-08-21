@@ -1,0 +1,22 @@
+databaseChangeLog:
+  - changeSet:
+      id: 080-seed-operational-knobs
+      author: claude
+      comment: >-
+        Seed validated operational knobs into bot.app_settings (cs080).
+        Five rows that existed only as hand-set staging values are now
+        migration-managed so a fresh/rebuilt DB starts in the safe operational
+        state instead of falling back to unsafe code defaults.
+        Knobs seeded (all ON CONFLICT DO NOTHING — idempotent):
+        news.proactive-posting.min-value=0.8(double) — was 1.5 code fallback,
+        news.web-enrich.min-value=1.0(double) — was 2.5 code fallback,
+        news.relevance.qdrant-top-k=50000(int),
+        retention.enabled=false(bool) — was true code fallback (destructive),
+        retention.days=7(int).
+        value_type strings matched from staging DB (double/int/bool).
+      changes:
+        - sqlFile:
+            path: ../sql/080-seed-operational-knobs.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false

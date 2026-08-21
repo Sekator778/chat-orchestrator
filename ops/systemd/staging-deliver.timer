@@ -1,0 +1,11 @@
+# Installed by ops/install-staging-timer.sh.
+[Unit]
+Description=Poll origin/main every 5 min and deliver to the staging stand
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+Unit=staging-deliver.service
+
+[Install]
+WantedBy=timers.target

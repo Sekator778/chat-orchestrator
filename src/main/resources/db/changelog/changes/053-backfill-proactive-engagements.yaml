@@ -1,0 +1,22 @@
+databaseChangeLog:
+  - changeSet:
+      id: 053-backfill-proactive-engagements
+      author: dev
+      comment: "Backfill proactive_engagements for all existing active chat configs × both bot personas"
+      changes:
+        - sql:
+            sql: |
+              INSERT INTO bot.proactive_engagements
+                  (chat_id, bot_instance_id, language, send_hour_utc, enabled, created_at, updated_at)
+              SELECT
+                  cc.channel_chat_id                                                       AS chat_id,
+                  b.bot_instance_id,
+                  'ru'                                                                     AS language,
+                  15 + (ABS(HASHTEXT(cc.channel_chat_id::text || b.bot_instance_id)) % 6) AS send_hour_utc,
+                  TRUE                                                             AS enabled,
+                  NOW()                                                            AS created_at,
+                  NOW()                                                            AS updated_at
+              FROM bot.chat_configs cc
+              CROSS JOIN (VALUES ('2000000001'), ('2000000002')) AS b(bot_instance_id)
+              WHERE cc.enabled = TRUE
+              ON CONFLICT (chat_id, bot_instance_id) DO NOTHING;

@@ -1,0 +1,56 @@
+databaseChangeLog:
+  - changeSet:
+      id: 010-add-ranking-fields-to-messages
+      author: integration-revision
+      comment: "Add Python ranking fields to existing bot.messages table"
+      changes:
+        - addColumn:
+            tableName: messages
+            columns:
+              - column:
+                  name: importance
+                  type: DOUBLE PRECISION
+                  remarks: "Message importance score from Python ranking algorithm"
+              - column:
+                  name: content_hash
+                  type: TEXT
+                  remarks: "Content hash for deduplication"
+              - column:
+                  name: matched_keywords
+                  type: TEXT[]
+                  remarks: "Keywords that matched in this message"
+              - column:
+                  name: consensus
+                  type: DOUBLE PRECISION
+                  remarks: "Consensus score for message"
+              - column:
+                  name: novelty
+                  type: DOUBLE PRECISION
+                  remarks: "Novelty score for message"
+              - column:
+                  name: views
+                  type: BIGINT
+                  remarks: "View count for channel messages (NULL for regular messages)"
+              - column:
+                  name: forwards
+                  type: BIGINT
+                  remarks: "Forward count for channel messages (NULL for regular messages)"
+
+  - changeSet:
+      id: 010-add-ranking-indexes
+      author: integration-revision
+      comment: "Add indexes for ranking performance"
+      changes:
+        - createIndex:
+            tableName: messages
+            indexName: idx_messages_importance
+            columns:
+              - column:
+                  name: importance
+                  descending: true
+        - createIndex:
+            tableName: messages
+            indexName: idx_messages_content_hash
+            columns:
+              - column:
+                  name: content_hash

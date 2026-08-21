@@ -1,0 +1,21 @@
+databaseChangeLog:
+  - changeSet:
+      id: 2026-06-10-persona-activity-schedule
+      author: claude
+      changes:
+        - addColumn:
+            tableName: telegram_accounts
+            schemaName: bot
+            columns:
+              - column:
+                  name: active_from
+                  type: TIME
+                  remarks: Daily activity window start (persona local time); NULL = always active
+              - column:
+                  name: active_until
+                  type: TIME
+                  remarks: Daily activity window end; start > end wraps past midnight
+              - column:
+                  name: timezone
+                  type: VARCHAR(64)
+                  remarks: IANA zone for the activity window (e.g. Europe/Berlin); NULL = system default

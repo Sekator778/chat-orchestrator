@@ -1,0 +1,15 @@
+ databaseChangeLog:
+  - changeSet:
+      id: 040-chat-config-multi-stage
+      author: codex
+      changes:
+        - addColumn:
+            schemaName: bot
+            tableName: chat_configs
+            columns:
+              - column:
+                  name: multi_stage_enabled
+                  type: boolean
+                  defaultValueBoolean: false
+                  constraints:
+                    nullable: false

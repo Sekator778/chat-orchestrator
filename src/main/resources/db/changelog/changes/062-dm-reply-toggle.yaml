@@ -1,0 +1,36 @@
+databaseChangeLog:
+  - changeSet:
+      id: 2026-06-10-dm-reply-toggle
+      author: claude
+      changes:
+        - addColumn:
+            tableName: bot_personas
+            schemaName: bot
+            columns:
+              - column:
+                  name: reply_to_direct
+                  type: BOOLEAN
+                  defaultValueBoolean: false
+                  remarks: >-
+                    When true this persona answers private (direct) messages,
+                    replying in the same DM, always (no probability roll —
+                    a direct address is an explicit request). Default off:
+                    a DM to a persona with the toggle disabled is silently
+                    ignored. Set per bot_id; if a persona has several
+                    language rows, ANY row with true enables the DM reply.
+                  constraints:
+                    nullable: false
+        - addColumn:
+            tableName: messages
+            schemaName: bot
+            columns:
+              - column:
+                  name: received_by_bot_id
+                  type: VARCHAR(64)
+                  remarks: >-
+                    Which persona client ingested this message. Load-bearing
+                    for private chats: TDLib gives a private chat the peer's
+                    user id as chat_id, so the same human's DMs to different
+                    personas all share one chat_id — this column is the only
+                    way to tell those threads apart. Null for rows persisted
+                    before this column or via paths without a client context.

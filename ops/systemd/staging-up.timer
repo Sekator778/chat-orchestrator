@@ -1,0 +1,13 @@
+# Installed by ops/install-staging-timer.sh.
+# Fires ONCE, ~5 min after the machine/WSL boots (systemd start), to bring the
+# staging stand up automatically. No periodic repeat — staging-deliver.timer
+# handles ongoing updates on new commits.
+[Unit]
+Description=Bring up the chat-orchestrator staging stand ~5 min after boot
+
+[Timer]
+OnBootSec=5min
+Unit=staging-up.service
+
+[Install]
+WantedBy=timers.target

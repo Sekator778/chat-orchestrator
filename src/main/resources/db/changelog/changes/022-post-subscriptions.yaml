@@ -1,0 +1,11 @@
+databaseChangeLog:
+  - changeSet:
+      id: 022-post-subscriptions
+      author: codex
+      comment: "Stage 3: Event publishing - subscriptions, audit trail, and helper functions"
+      changes:
+        - sqlFile:
+            path: ../sql/022-post-subscriptions.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false

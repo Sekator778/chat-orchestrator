@@ -1,0 +1,11 @@
+databaseChangeLog:
+  - changeSet:
+      id: 017-events-alerts-complete
+      author: codex
+      comment: "Event detection and alerting system - CONSOLIDATED for production (includes fixes from 018, 019, 020, 021)"
+      changes:
+        - sqlFile:
+            path: ../sql/017-events-alerts-complete.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false

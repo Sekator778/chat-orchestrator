@@ -1,0 +1,56 @@
+databaseChangeLog:
+  - changeSet:
+      id: 042-chat-config-drop-bot-instance
+      author: codex
+      comment: "ChatConfig is chat-scoped; drop bot_instance_id and restore uniqueness by channel_chat_id"
+      preConditions:
+        - onFail: MARK_RAN
+        - tableExists:
+            schemaName: bot
+            tableName: chat_configs
+      changes:
+        - dropIndex:
+            schemaName: bot
+            tableName: chat_configs
+            indexName: idx_chat_configs_instance
+            ifExists: true
+        - sql:
+            dbms: postgresql
+            splitStatements: false
+            stripComments: true
+            sql: |
+              ALTER TABLE bot.chat_configs DROP CONSTRAINT IF EXISTS uq_chat_configs_channel_instance;
+              ALTER TABLE bot.chat_configs DROP CONSTRAINT IF EXISTS uq_chat_configs_channel;
+              ALTER TABLE bot.chat_configs ADD CONSTRAINT uq_chat_configs_channel UNIQUE (channel_chat_id);
+        - dropColumn:
+            schemaName: bot
+            tableName: chat_configs
+            columnName: bot_instance_id
+      rollback:
+        - addColumn:
+            schemaName: bot
+            tableName: chat_configs
+            columns:
+              - column:
+                  name: bot_instance_id
+                  type: TEXT
+                  defaultValue: default-bot
+                  constraints:
+                    nullable: false
+        - sql:
+            dbms: postgresql
+            splitStatements: false
+            stripComments: true
+            sql: |
+              ALTER TABLE bot.chat_configs DROP CONSTRAINT IF EXISTS uq_chat_configs_channel;
+              ALTER TABLE bot.chat_configs DROP CONSTRAINT IF EXISTS uq_chat_configs_channel_instance;
+              ALTER TABLE bot.chat_configs ADD CONSTRAINT uq_chat_configs_channel_instance UNIQUE (channel_chat_id, bot_instance_id);
+        - createIndex:
+            schemaName: bot
+            tableName: chat_configs
+            indexName: idx_chat_configs_instance
+            columns:
+              - column:
+                  name: bot_instance_id
+              - column:
+                  name: channel_chat_id

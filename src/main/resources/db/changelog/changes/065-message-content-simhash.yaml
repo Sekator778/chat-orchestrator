@@ -1,0 +1,50 @@
+databaseChangeLog:
+  # =================================================================
+  # SimHash column for bot.messages
+  # =================================================================
+  # Adds content_simhash CHAR(16) to bot.messages so that the
+  # ClusteringServiceImpl can compare 16-hex SimHash values instead
+  # of 40-hex SHA-1 content_hash values (which always produce
+  # Hamming distance = 64 and make clustering a silent no-op).
+  # Existing rows are NOT back-filled; new messages will carry the
+  # field from MessageEntityHydrator going forward.
+  # =================================================================
+
+  - changeSet:
+      id: 2026-06-13-message-content-simhash
+      author: claude-agent
+      comment: "Add content_simhash CHAR(16) to bot.messages for SimHash-based clustering"
+      preConditions:
+        - onFail: MARK_RAN
+        - not:
+            - columnExists:
+                schemaName: bot
+                tableName: messages
+                columnName: content_simhash
+      changes:
+        - addColumn:
+            schemaName: bot
+            tableName: messages
+            columns:
+              - column:
+                  name: content_simhash
+                  type: CHAR(16)
+                  constraints:
+                    nullable: true
+                  remarks: "64-bit SimHash of message content as 16-char hex; used for near-duplicate clustering"
+        - createIndex:
+            schemaName: bot
+            tableName: messages
+            indexName: idx_messages_content_simhash
+            columns:
+              - column:
+                  name: content_simhash
+      rollback:
+        - dropIndex:
+            schemaName: bot
+            tableName: messages
+            indexName: idx_messages_content_simhash
+        - dropColumn:
+            schemaName: bot
+            tableName: messages
+            columnName: content_simhash

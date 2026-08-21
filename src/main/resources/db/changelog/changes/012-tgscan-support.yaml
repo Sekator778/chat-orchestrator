@@ -1,0 +1,10 @@
+databaseChangeLog:
+  - changeSet:
+      id: tgscan-013-support-objects
+      author: Codex
+      changes:
+        - sqlFile:
+            path: ../sql/012-tgscan-support.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false

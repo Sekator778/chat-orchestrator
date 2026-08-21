@@ -1,0 +1,20 @@
+databaseChangeLog:
+  - changeSet:
+      id: 036-channels-bot-instance-array
+      author: codex
+      changes:
+        - sql:
+            sql: |
+              -- Create new column with array type
+              ALTER TABLE tgscan.channels ADD COLUMN bot_instance_id_temp TEXT[];
+
+              -- Force all rows to the default bot id array, ignoring previous values
+              UPDATE tgscan.channels SET bot_instance_id_temp = ARRAY['2000000001'];
+
+              -- Drop old column and rename new one
+              ALTER TABLE tgscan.channels DROP COLUMN bot_instance_id;
+              ALTER TABLE tgscan.channels RENAME COLUMN bot_instance_id_temp TO bot_instance_id;
+
+              -- Enforce NOT NULL and default
+              ALTER TABLE tgscan.channels ALTER COLUMN bot_instance_id SET NOT NULL;
+              ALTER TABLE tgscan.channels ALTER COLUMN bot_instance_id SET DEFAULT ARRAY['2000000001'];

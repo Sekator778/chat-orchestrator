@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Maven settings for building this project on atlas (Apple Silicon).
+
+  Pass it explicitly on every build:
+      mvn -s docker/atlas/settings-atlas.xml ...
+
+  Why it exists: the machine-wide ~/.m2/settings.xml belongs to the corporate
+  other local work and does two things this project cannot live with -
+  <offline>true</offline>, and a mirror with <mirrorOf>*</mirrorOf> that reroutes
+  every repository id to Maven Central so no intranet host is ever contacted.
+  Under it the `mchv` repository from pom.xml (it.tdlight artifacts, which Central
+  does not carry) resolves to Central and the build dies on a missing
+  tdlight-natives. That file must stay untouched, so the override lives here.
+
+  The mirror keeps id `central`: Maven stamps the source repository id into
+  _remote.repositories inside ~/.m2/repository, which is shared with other
+  builds - a different id would make artifacts already cached there read as
+  "present, but unavailable" on the next offline build.
+-->
+<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0 http://maven.apache.org/xsd/settings-1.0.0.xsd">
+
+  <offline>false</offline>
+
+  <mirrors>
+    <mirror>
+      <id>central</id>
+      <name>Maven Central - everything except the TDLight repository</name>
+      <url>https://repo1.maven.org/maven2/</url>
+      <!-- !mchv leaves pom.xml's TDLight repository reachable at its own URL. -->
+      <mirrorOf>*,!mchv</mirrorOf>
+    </mirror>
+  </mirrors>
+
+</settings>

@@ -1,0 +1,138 @@
+databaseChangeLog:
+  # =================================================================
+  # News Scoring and Clustering System
+  # =================================================================
+  # Adds:
+  # 1. Clustering columns to bot.messages (cluster_id, is_primary_in_cluster)
+  # 2. source_trust table for channel credibility scores
+  # 3. Indexes for efficient clustering queries
+  # =================================================================
+
+  - changeSet:
+      id: 040-add-clustering-columns-to-messages
+      author: dev-team
+      comment: "Add clustering columns to bot.messages for message grouping"
+      changes:
+        - addColumn:
+            schemaName: bot
+            tableName: messages
+            columns:
+              - column:
+                  name: cluster_id
+                  type: VARCHAR(64)
+                  remarks: "Groups similar messages together"
+              - column:
+                  name: is_primary_in_cluster
+                  type: BOOLEAN
+                  defaultValueBoolean: false
+                  remarks: "True for highest scored message in cluster"
+
+  - changeSet:
+      id: 040-add-clustering-columns-to-tgscan-messages
+      author: dev-team
+      comment: "Add clustering columns to tgscan.messages for message grouping"
+      preConditions:
+        - onFail: MARK_RAN
+        - tableExists:
+            schemaName: tgscan
+            tableName: messages
+      changes:
+        - addColumn:
+            schemaName: tgscan
+            tableName: messages
+            columns:
+              - column:
+                  name: is_primary_in_cluster
+                  type: BOOLEAN
+                  defaultValueBoolean: false
+                  remarks: "True for highest scored message in cluster"
+
+  - changeSet:
+      id: 040-create-source-trust-table
+      author: dev-team
+      comment: "Create source_trust table for channel credibility scores"
+      changes:
+        - createTable:
+            schemaName: tgscan
+            tableName: source_trust
+            columns:
+              - column:
+                  name: channel_id
+                  type: BIGINT
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: trust_score
+                  type: DOUBLE PRECISION
+                  defaultValueNumeric: 0.5
+                  remarks: "Trust score from 0.0 to 1.0"
+              - column:
+                  name: is_official
+                  type: BOOLEAN
+                  defaultValueBoolean: false
+                  remarks: "True for officially verified sources"
+              - column:
+                  name: category
+                  type: VARCHAR(50)
+                  remarks: "EXCHANGE, INFLUENCER, NEWS, PROJECT, COMMUNITY"
+              - column:
+                  name: manual_override
+                  type: BOOLEAN
+                  defaultValueBoolean: false
+                  remarks: "True if trust score was manually set"
+              - column:
+                  name: created_at
+                  type: TIMESTAMP WITH TIME ZONE
+                  defaultValueComputed: NOW()
+              - column:
+                  name: last_updated
+                  type: TIMESTAMP WITH TIME ZONE
+                  defaultValueComputed: NOW()
+
+  - changeSet:
+      id: 040-create-clustering-indexes
+      author: dev-team
+      comment: "Create indexes for efficient clustering queries"
+      changes:
+        - createIndex:
+            schemaName: bot
+            tableName: messages
+            indexName: idx_messages_cluster_id
+            columns:
+              - column:
+                  name: cluster_id
+        - createIndex:
+            schemaName: bot
+            tableName: messages
+            indexName: idx_messages_cluster_primary
+            columns:
+              - column:
+                  name: cluster_id
+              - column:
+                  name: is_primary_in_cluster
+        - createIndex:
+            schemaName: bot
+            tableName: messages
+            indexName: idx_messages_date_unclustered
+            columns:
+              - column:
+                  name: date
+                  descending: true
+              - column:
+                  name: cluster_id
+
+  - changeSet:
+      id: 040-add-source-trust-fk
+      author: dev-team
+      comment: "Add foreign key from source_trust to channels"
+      changes:
+        - addForeignKeyConstraint:
+            baseTableSchemaName: tgscan
+            baseTableName: source_trust
+            baseColumnNames: channel_id
+            constraintName: fk_source_trust_channel
+            referencedTableSchemaName: tgscan
+            referencedTableName: channels
+            referencedColumnNames: id
+            onDelete: CASCADE

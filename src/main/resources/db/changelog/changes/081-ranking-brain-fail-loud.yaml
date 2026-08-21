@@ -1,0 +1,22 @@
+databaseChangeLog:
+  - changeSet:
+      id: 081-ranking-brain-fail-loud
+      author: claude
+      comment: >-
+        Make bot.fn_recompute_importance() fail loud on error (cs081).
+        Previously the EXCEPTION handler used RAISE WARNING (a Postgres NOTICE),
+        which does NOT propagate an error to the caller. ImportanceRecomputeScheduledJob
+        then logged "Importance recompute completed" and printed a distribution from
+        OLD importance values — masking ranking brain failures as green operations.
+        This already caused a multi-day silent outage (sqrt-of-negative crash, 2026-06-19).
+        Fix: change RAISE WARNING to RAISE EXCEPTION so errors propagate to the Java
+        job (.doOnError logs ERROR, .onErrorResume returns Mono.empty() so the
+        scheduler continues on the next hourly tick).
+        The function body is reproduced verbatim from pg_get_functiondef with only
+        the single EXCEPTION handler line changed.
+      changes:
+        - sqlFile:
+            path: ../sql/081-ranking-brain-fail-loud.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false

@@ -1,0 +1,11 @@
+databaseChangeLog:
+  - changeSet:
+      id: 008-message-importance-system
+      author: consolidated
+      comment: "Complete message importance calculation system with trigger and functions"
+      changes:
+        - sqlFile:
+            path: ../sql/008-message-importance.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false

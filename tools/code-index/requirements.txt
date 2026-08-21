@@ -1,0 +1,6 @@
+# Qdrant client with the FastEmbed extra: embeddings run locally (ONNX),
+# no API key and no third-party calls. The model is downloaded once.
+# Pinned exactly for reproducible builds: index_repo.py / search.py use the
+# FastEmbed convenience API (add / query), which is version-sensitive. Bump
+# this version deliberately and re-test the indexer after a change.
+qdrant-client[fastembed]==1.18.0

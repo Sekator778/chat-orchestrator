@@ -1,0 +1,177 @@
+databaseChangeLog:
+  - changeSet:
+      id: llm-001-create-llm-queries
+      author: dev-team
+      preConditions:
+        - onFail: HALT
+        - not:
+            tableExists:
+              tableName: llm_queries
+      changes:
+        - createTable:
+            tableName: llm_queries
+            columns:
+              - column:
+                  name: id
+                  type: BIGSERIAL
+                  autoIncrement: true
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: chat_id
+                  type: BIGINT
+                  constraints:
+                    nullable: false
+              - column:
+                  name: triggering_message_id
+                  type: BIGINT
+                  constraints:
+                    nullable: false
+              - column:
+                  name: sender_id
+                  type: BIGINT
+              - column:
+                  name: sender_username
+                  type: VARCHAR(255)
+              - column:
+                  name: sender_name
+                  type: VARCHAR(255)
+              - column:
+                  name: trigger_excerpt
+                  type: TEXT
+              - column:
+                  name: triggered_at
+                  type: TIMESTAMP WITH TIME ZONE
+                  constraints:
+                    nullable: false
+              - column:
+                  name: completed_at
+                  type: TIMESTAMP WITH TIME ZONE
+              - column:
+                  name: status
+                  type: VARCHAR(30)
+                  defaultValue: 'IN_PROGRESS'
+                  constraints:
+                    nullable: false
+              - column:
+                  name: should_respond
+                  type: BOOLEAN
+              - column:
+                  name: decision_intent
+                  type: VARCHAR(50)
+              - column:
+                  name: decision_tone
+                  type: VARCHAR(50)
+              - column:
+                  name: decision_confidence
+                  type: DOUBLE PRECISION
+              - column:
+                  name: attempt_count
+                  type: INTEGER
+                  defaultValueNumeric: 0
+                  constraints:
+                    nullable: false
+              - column:
+                  name: skip_reason
+                  type: TEXT
+              - column:
+                  name: final_response
+                  type: TEXT
+              - column:
+                  name: metadata
+                  type: TEXT
+              - column:
+                  name: created_at
+                  type: TIMESTAMP WITH TIME ZONE
+                  defaultValueComputed: CURRENT_TIMESTAMP
+                  constraints:
+                    nullable: false
+        - createIndex:
+            tableName: llm_queries
+            indexName: idx_llm_queries_chat_message
+            columns:
+              - column:
+                  name: chat_id
+              - column:
+                  name: triggering_message_id
+      rollback:
+        - dropTable:
+            tableName: llm_queries
+
+  - changeSet:
+      id: llm-002-create-llm-query-messages
+      author: dev-team
+      preConditions:
+        - onFail: HALT
+        - tableExists:
+            tableName: llm_queries
+        - not:
+            tableExists:
+              tableName: llm_query_messages
+      changes:
+        - createTable:
+            tableName: llm_query_messages
+            columns:
+              - column:
+                  name: id
+                  type: BIGSERIAL
+                  autoIncrement: true
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: query_id
+                  type: BIGINT
+                  constraints:
+                    nullable: false
+              - column:
+                  name: phase
+                  type: VARCHAR(50)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: attempt
+                  type: INTEGER
+              - column:
+                  name: sequence
+                  type: INTEGER
+                  constraints:
+                    nullable: false
+              - column:
+                  name: role
+                  type: VARCHAR(20)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: content
+                  type: TEXT
+                  constraints:
+                    nullable: false
+              - column:
+                  name: metadata
+                  type: TEXT
+              - column:
+                  name: created_at
+                  type: TIMESTAMP WITH TIME ZONE
+                  defaultValueComputed: CURRENT_TIMESTAMP
+                  constraints:
+                    nullable: false
+        - addForeignKeyConstraint:
+            baseTableName: llm_query_messages
+            baseColumnNames: query_id
+            referencedTableName: llm_queries
+            referencedColumnNames: id
+            constraintName: fk_llm_query_messages_query
+            onDelete: CASCADE
+        - createIndex:
+            tableName: llm_query_messages
+            indexName: idx_llm_query_messages_query
+            columns:
+              - column:
+                  name: query_id
+              - column:
+                  name: sequence
+      rollback:
+        - dropTable:
+            tableName: llm_query_messages

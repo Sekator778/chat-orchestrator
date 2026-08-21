@@ -1,0 +1,92 @@
+# ============================================================================
+# Unified Test Configuration
+# Used by ALL integration tests (BaseIntegrationTest)
+# Database: unit_db (live PostgreSQL)
+# Kafka: Embedded via @EmbeddedKafka or live broker
+# ============================================================================
+
+spring:
+  application:
+    name: telegram-userbot-test
+
+  # Database Configuration - Live PostgreSQL (unit_db)
+  r2dbc:
+    url: r2dbc:postgresql://localhost:5432/unit_db?schema=bot
+    username: ${DATABASE_USERNAME:test}
+    password: ${DATABASE_PASSWORD:test}
+    pool:
+      enabled: true
+      initial-size: 5
+      max-size: 20
+      max-idle-time: 30m
+      max-acquire-time: 3s
+
+  # Liquibase - Schema migrations
+  liquibase:
+    enabled: true
+    change-log: classpath:db/changelog/db.changelog-master.yaml
+    url: jdbc:postgresql://localhost:5432/unit_db
+    user: ${DATABASE_USERNAME:test}
+    password: ${DATABASE_PASSWORD:test}
+    liquibase-schema: public
+    default-schema: bot
+
+  # Kafka Configuration
+  # bootstrap-servers will be overridden by @DynamicPropertySource in tests using embedded Kafka
+  kafka:
+    bootstrap-servers: ${spring.embedded.kafka.brokers:localhost:9092}
+    topic:
+      incoming-messages: test-telegram-incoming-messages
+    consumer:
+      group-id: telegram-userbot-test-consumer
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      max-poll-records: 100
+    producer:
+      acks: all
+      retries: 3
+    listener:
+      ack-mode: manual
+      concurrency: 5
+
+# Telegram API Configuration (test values)
+telegram:
+  enabled: false
+  client:
+    enabled: false  # Disable TelegramClientConfig to avoid @Primary bean conflict with test mocks
+  api:
+    id: ${TELEGRAM_API_ID:12345678}
+    hash: ${TELEGRAM_API_HASH:test_hash}
+    phone-number: ${TELEGRAM_PHONE_NUMBER:+1234567890}
+
+# Disable features not needed in tests
+startup:
+  sync:
+    enabled: false
+
+app:
+  http:
+    enabled: false
+
+python:
+  scheduler:
+    enabled: false
+
+events:
+  watcher:
+    enabled: false  # Disabled by default in tests, enable per-test if needed
+    poll-interval-ms: 5000
+    min-confidence: 0.45
+    min-severity: low
+    batch-size: 100
+
+# Logging
+logging:
+  level:
+    root: INFO
+    com.example.telegramuserbot: DEBUG
+    org.springframework.kafka: WARN
+    org.springframework.r2dbc: WARN
+    org.springframework.transaction: WARN
+    io.r2dbc: WARN
+    liquibase: INFO

@@ -1,0 +1,168 @@
+databaseChangeLog:
+  - changeSet:
+      id: msg-001-create-messages
+      author: dev-team
+      preConditions:
+        - onFail: HALT
+        - not:
+            tableExists:
+              tableName: messages
+      changes:
+        - createTable:
+            tableName: messages
+            columns:
+              - column:
+                  name: id
+                  type: BIGSERIAL
+                  autoIncrement: true
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: chat_id
+                  type: BIGINT
+                  constraints:
+                    nullable: false
+              - column:
+                  name: message_id
+                  type: BIGINT
+                  constraints:
+                    nullable: false
+              - column:
+                  name: telegram_message_id
+                  type: BIGINT
+              - column:
+                  name: content
+                  type: TEXT
+              - column:
+                  name: caption
+                  type: TEXT
+              - column:
+                  name: date
+                  type: TIMESTAMP WITH TIME ZONE
+                  constraints:
+                    nullable: false
+              - column:
+                  name: edit_date
+                  type: TIMESTAMP WITH TIME ZONE
+              - column:
+                  name: is_outgoing
+                  type: BOOLEAN
+                  defaultValueBoolean: false
+                  constraints:
+                    nullable: false
+              - column:
+                  name: sender_id
+                  type: BIGINT
+              - column:
+                  name: sender_name
+                  type: VARCHAR(255)
+              - column:
+                  name: sender_username
+                  type: VARCHAR(255)
+              - column:
+                  name: sender_first_name
+                  type: VARCHAR(255)
+              - column:
+                  name: sender_last_name
+                  type: VARCHAR(255)
+              - column:
+                  name: user_id
+                  type: BIGINT
+              - column:
+                  name: username
+                  type: VARCHAR(255)
+              - column:
+                  name: media_type
+                  type: VARCHAR(50)
+              - column:
+                  name: media_file_path
+                  type: VARCHAR(255)
+              - column:
+                  name: media_kind
+                  type: VARCHAR(50)
+              - column:
+                  name: media_path
+                  type: VARCHAR(255)
+              - column:
+                  name: message_type
+                  type: VARCHAR(50)
+                  defaultValue: 'USER_MESSAGE'
+                  constraints:
+                    nullable: false
+              - column:
+                  name: channel_id
+                  type: BIGINT
+              - column:
+                  name: imported_from_sync
+                  type: BOOLEAN
+                  defaultValueBoolean: false
+                  constraints:
+                    nullable: false
+              - column:
+                  name: sync_job_id
+                  type: BIGINT
+              - column:
+                  name: forward_from_chat_id
+                  type: BIGINT
+              - column:
+                  name: reply_to_message_id
+                  type: BIGINT
+              - column:
+                  name: reply_to_chat_id
+                  type: BIGINT
+              - column:
+                  name: raw_message_dump
+                  type: TEXT
+              - column:
+                  name: created_at
+                  type: TIMESTAMP WITH TIME ZONE
+                  defaultValueComputed: CURRENT_TIMESTAMP
+                  constraints:
+                    nullable: false
+        - createIndex:
+            tableName: messages
+            indexName: uq_messages_chat_message
+            unique: true
+            columns:
+              - column:
+                  name: chat_id
+              - column:
+                  name: message_id
+        - createIndex:
+            tableName: messages
+            indexName: idx_messages_chat_telegram
+            columns:
+              - column:
+                  name: chat_id
+              - column:
+                  name: telegram_message_id
+        - createIndex:
+            tableName: messages
+            indexName: idx_messages_chat_date
+            columns:
+              - column:
+                  name: chat_id
+              - column:
+                  name: date
+        - createIndex:
+            tableName: messages
+            indexName: idx_messages_message_type
+            columns:
+              - column:
+                  name: message_type
+        - createIndex:
+            tableName: messages
+            indexName: idx_messages_sync_job
+            columns:
+              - column:
+                  name: sync_job_id
+        - createIndex:
+            tableName: messages
+            indexName: idx_messages_channel
+            columns:
+              - column:
+                  name: channel_id
+      rollback:
+        - dropTable:
+            tableName: messages

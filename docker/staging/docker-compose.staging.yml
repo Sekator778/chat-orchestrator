@@ -1,0 +1,195 @@
+# =============================================================================
+# Staging stack — a persistent, prod-like dev stand on the local Ubuntu host.
+# ONE app instance manages N TDLight accounts in-process (telegram.accounts list,
+# BotInstanceProvider picks persona-ids[0] as primary) — matching the app design.
+# Backed by an isolated Postgres + Kafka(Redpanda) + Qdrant.
+#
+# Accounts + all real secrets come from docker/staging/.env.staging (gitignored,
+# injected into the app via env_file). Add an account = add another
+# TELEGRAM_ACCOUNTS_<n>_* block + extend BOT_PERSONA_IDS, then restart — no
+# compose change, whether it's 2 accounts or 100.
+#
+# Usage (via scripts/deliver-staging.sh, or manually):
+#   docker compose --env-file docker/staging/.env.staging \
+#     -f docker/staging/docker-compose.staging.yml up -d
+#   # one-time interactive login (prompts for EACH account's code in sequence):
+#   docker compose --env-file docker/staging/.env.staging \
+#     -f docker/staging/docker-compose.staging.yml run --rm app
+# =============================================================================
+
+services:
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: tg-staging-postgres
+    environment:
+      POSTGRES_DB: ${STAGING_DB_NAME:-news_aggregator_db}
+      POSTGRES_USER: ${STAGING_DB_USER:-staging}
+      POSTGRES_PASSWORD: ${STAGING_DB_PASSWORD:?set STAGING_DB_PASSWORD in .env.staging}
+    volumes:
+      - ./init-staging-db.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - pgdata-staging:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${STAGING_DB_USER:-staging} -d ${STAGING_DB_NAME:-news_aggregator_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    networks: [staging-net]
+
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v24.2.18
+    container_name: tg-staging-redpanda
+    command:
+      - redpanda
+      - start
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:19092
+      - --mode dev-container
+      - --default-log-level warn
+    volumes:
+      - redpanda-staging:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -Eq 'Healthy:.*true' || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 18
+      start_period: 15s
+    networks: [staging-net]
+
+  qdrant:
+    image: qdrant/qdrant:v1.12.4
+    container_name: tg-staging-qdrant
+    # Qdrant + RocksDB open many file handles (one+ per segment). The Docker default
+    # nofile soft limit (1024) is far too low: under the news-embedding backfill's
+    # many concurrent upserts Qdrant exhausted it — "Too many open files (os error 24)",
+    # could no longer accept connections (app saw HTTP 000) nor flush segments, and
+    # embedding stalled (upserts returned false, rows never marked embedded_at).
+    # Qdrant's own guidance is a high nofile limit; 65536 is ample for this collection.
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - qdrant-staging:/qdrant/storage
+    restart: unless-stopped
+    networks: [staging-net]
+
+  # HuggingFace Text Embeddings Inference — serves BAAI/bge-m3 (1024-dim, multilingual).
+  # The model (~2 GB) is cached in the named volume `embeddings-model-cache` so it is
+  # downloaded once and survives container restarts. No host port exposed — the app
+  # reaches it at http://embeddings:80 over staging-net.
+  # First boot downloads the model and may take a few minutes; the app is fail-open
+  # (embed() returns Mono.empty() while TEI is warming up).
+  #
+  # MEMORY BOUNDING (2026-06-21): bge-m3 is XLM-RoBERTa-large (568M params); on TEI/CPU
+  # the model + ONNX arena resident ~3 GiB under real load. UNBOUNDED, TEI's default
+  # 512-way concurrency ballooned RSS to ~28 GiB under the backfill. --max-batch-tokens /
+  # --auto-truncate bound per-batch activation buffers; mem_limit is a backstop above the
+  # peak — NOT a squeeze (a too-tight cap would OOM-kill TEI, and restart:unless-stopped
+  # would crash-loop it while fail-open silently hid the outage).
+  #
+  # CONCURRENCY HEADROOM (must exceed the embedding job's fan-out): NewsEmbeddingScheduledJob
+  # does flatMap(embedOneRow, CONCURRENCY=4) — so a busy embed tick alone can occupy 4 TEI
+  # slots. At --max-concurrent-requests 4 that left ZERO headroom: a coinciding
+  # PersonaProfileService.embed (the per-persona profile vector the posting path needs)
+  # got 429'd → posting silently fell back to value-only ranking until the profile
+  # re-embedded on a quieter tick. Set to 12 (job's 4 + both personas' profile embeds +
+  # margin) so cosine ranking is robust right after a restart; memory at 12-way is ~4 GiB,
+  # comfortably under the 16g cap. Verify the live mem_limit landed after deploy:
+  #   docker inspect tg-staging-embeddings --format '{{.HostConfig.Memory}}'  (must be nonzero)
+  embeddings:
+    image: ghcr.io/huggingface/text-embeddings-inference:cpu-1.7
+    container_name: tg-staging-embeddings
+    command:
+      - --model-id
+      - BAAI/bge-m3
+      - --max-concurrent-requests
+      - "12"
+      - --max-batch-tokens
+      - "2048"
+      - --max-client-batch-size
+      - "8"
+      - --auto-truncate
+    mem_limit: 16g
+    cpus: "4.0"
+    volumes:
+      - embeddings-model-cache:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:80/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+    restart: unless-stopped
+    networks: [staging-net]
+
+  # ONE app instance — manages every account in telegram.accounts in-process.
+  app:
+    image: ${APP_IMAGE:-telegram-userbot:staging}
+    build:
+      context: ../..
+      dockerfile: docker/smoke/Dockerfile.smoke
+      args:
+        TD_LIGHT_CLASSIFIER: linux_amd64_gnu_ssl3
+    container_name: tg-staging-app
+    # restart "no" (NOT unless-stopped): Docker does NOT honor compose depends_on on
+    # daemon boot, so unless-stopped would auto-start the app in parallel with — and
+    # usually before — postgres, crashing it on UnknownHostException. The app must
+    # come up ONLY after the whole infra is healthy. The infra services keep
+    # unless-stopped (they auto-start on boot); the app is started solely by
+    # staging-up.timer (OnBootSec=5min → `up -d --force-recreate app`, which waits for
+    # depends_on healthy). Infra first, app last — no boot race. (2026-06-07)
+    restart: "no"
+    stdin_open: true          # allow `run --rm app` / `docker attach` for the one-time login code
+    tty: true
+    # accounts list + secrets (TELEGRAM_ACCOUNTS_n_*, BOT_PERSONA_IDS,
+    # TELEGRAM_ALLOWEDCOMMANDCHATID, DEEPSEEK_API_KEY) — gitignored.
+    env_file:
+      - .env.staging
+    environment:
+      SPRING_PROFILES_ACTIVE: staging
+      APP_HTTP_ENABLED: "true"
+      DATABASE_HOST: postgres
+      DATABASE_PORT: "5432"
+      DATABASE_NAME: ${STAGING_DB_NAME:-news_aggregator_db}
+      DATABASE_USERNAME: ${STAGING_DB_USER:-staging}
+      DATABASE_PASSWORD: ${STAGING_DB_PASSWORD:?set STAGING_DB_PASSWORD in .env.staging}
+      KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+      MEMO_QDRANT_URL: http://qdrant:6333
+      TDLIB_DB_DIR: /data/tdlib_db
+      TDLIB_FILES_DIR: /data/tdlib_files
+    ports:
+      - "${STAGING_APP_PORT:-8099}:8099"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      qdrant:
+        condition: service_started
+      embeddings:
+        condition: service_started
+    volumes:
+      # SACRED: TDLight sessions + tdlib db/files live here. A BIND MOUNT to a
+      # stable host dir OUTSIDE the repo — survives `docker compose down [-v]`,
+      # `docker volume prune`, `docker system prune`, and any git operation. Once
+      # the accounts are authorized, never delete this directory (re-auth needs
+      # the phone code again). Set STAGING_DATA_DIR in .env.staging; back it up.
+      - ${STAGING_DATA_DIR:?set STAGING_DATA_DIR to a stable host dir OUTSIDE the repo in .env.staging}:/data
+    networks: [staging-net]
+
+networks:
+  staging-net:
+    driver: bridge
+    name: tg-staging-net
+
+volumes:
+  # NOTE: sessions are NOT a Docker volume — they are a bind mount (STAGING_DATA_DIR)
+  # so a stray `docker compose down -v` / `volume prune` can never wipe them.
+  pgdata-staging:
+  redpanda-staging:
+  qdrant-staging:
+  # bge-m3 model cache (~2 GB). Named volume so `docker compose down` without -v
+  # preserves it across restarts and compose-file updates.
+  embeddings-model-cache:

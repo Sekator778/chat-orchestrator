@@ -1,0 +1,12 @@
+databaseChangeLog:
+  - changeSet:
+      id: 024-events-use-bot-messages
+      author: codex
+      context: default
+      comment: "Redirect event detection and importance calculation from tgscan.messages to bot.messages"
+      changes:
+        - sqlFile:
+            path: ../sql/024-events-use-bot-messages.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false

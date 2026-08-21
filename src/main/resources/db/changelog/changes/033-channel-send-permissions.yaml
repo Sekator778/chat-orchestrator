@@ -1,0 +1,13 @@
+databaseChangeLog:
+  - changeSet:
+      id: 033-channel-send-permissions
+      author: codex
+      changes:
+        - addColumn:
+            schemaName: tgscan
+            tableName: channels
+            columns:
+              - column:
+                  name: can_send_messages
+                  type: boolean
+                  remarks: Indicates if the bot/user can send messages to the chat

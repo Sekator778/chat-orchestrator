@@ -1,0 +1,21 @@
+databaseChangeLog:
+  - changeSet:
+      id: 075-ranking-brain-sqrt-fix
+      author: claude
+      comment: >-
+        Fix silent sqrt-of-negative crash in bot.fn_recompute_importance().
+        Wilson quality term computed p = forwards/views without clamping; real
+        Telegram data has rows where forwards > views (p > 1), making p*(1-p)
+        negative and SQRT throw. One bad row aborted the entire set-based UPDATE;
+        the EXCEPTION WHEN OTHERS block swallowed the error → importance never
+        updated since #109. Fix: clamp p to [0,1] with LEAST(1.0, ...) in all
+        three Wilson occurrences per branch (center term + both p*(1-p) terms),
+        and wrap the SQRT radicand in GREATEST(0.0, ...) as belt-and-suspenders.
+        Applied to both the size-term-enabled and default branches. Triggers an
+        immediate recompute on deploy.
+      changes:
+        - sqlFile:
+            path: ../sql/075-ranking-brain-sqrt-fix.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false

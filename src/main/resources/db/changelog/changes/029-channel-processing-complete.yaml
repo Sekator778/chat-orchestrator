@@ -1,0 +1,95 @@
+databaseChangeLog:
+  - changeSet:
+      id: pipeline-001-add-processing-columns
+      author: dev-team
+      comment: "Channel processing pipeline - CONSOLIDATED for production (includes 029 + 030)"
+      preConditions:
+        - onFail: HALT
+        - tableExists:
+            tableName: chat_configs
+            schemaName: bot
+        - tableExists:
+            tableName: channels
+            schemaName: tgscan
+      changes:
+        # Add processing phase columns to bot.chat_configs
+        - addColumn:
+            tableName: chat_configs
+            schemaName: bot
+            columns:
+              - column:
+                  name: processing_phase
+                  type: VARCHAR(20)
+                  defaultValue: 'RAW'
+                  remarks: 'Current phase: RAW, INGESTED, LINKED, CONFIGURED, ERROR'
+              - column:
+                  name: last_phase1_at
+                  type: TIMESTAMP WITH TIME ZONE
+                  remarks: 'Timestamp when Phase 1 (ingestion) completed'
+              - column:
+                  name: last_phase2_at
+                  type: TIMESTAMP WITH TIME ZONE
+                  remarks: 'Timestamp when Phase 2 (linking) completed'
+              - column:
+                  name: last_phase3_at
+                  type: TIMESTAMP WITH TIME ZONE
+                  remarks: 'Timestamp when Phase 3 (template application) completed'
+              - column:
+                  name: last_processing_error
+                  type: TEXT
+                  remarks: 'Last error message if processing failed'
+
+        # Add ingestion tracking to tgscan.channels (from 030)
+        - addColumn:
+            tableName: channels
+            schemaName: tgscan
+            columns:
+              - column:
+                  name: last_ingestion_attempt_at
+                  type: TIMESTAMP WITH TIME ZONE
+                  remarks: 'Timestamp of last Phase 1 ingestion attempt'
+
+        # Create indexes
+        - createIndex:
+            tableName: chat_configs
+            schemaName: bot
+            indexName: idx_chat_configs_processing_phase
+            columns:
+              - column:
+                  name: processing_phase
+
+        - createIndex:
+            tableName: channels
+            schemaName: tgscan
+            indexName: idx_tgscan_channels_last_ingestion
+            columns:
+              - column:
+                  name: last_ingestion_attempt_at
+
+      rollback:
+        - dropIndex:
+            tableName: channels
+            schemaName: tgscan
+            indexName: idx_tgscan_channels_last_ingestion
+        - dropIndex:
+            tableName: chat_configs
+            schemaName: bot
+            indexName: idx_chat_configs_processing_phase
+        - dropColumn:
+            tableName: channels
+            schemaName: tgscan
+            columnName: last_ingestion_attempt_at
+        - dropColumn:
+            tableName: chat_configs
+            schemaName: bot
+            columns:
+              - column:
+                  name: processing_phase
+              - column:
+                  name: last_phase1_at
+              - column:
+                  name: last_phase2_at
+              - column:
+                  name: last_phase3_at
+              - column:
+                  name: last_processing_error

@@ -1,0 +1,31 @@
+databaseChangeLog:
+  - changeSet:
+      id: pending-response-config-001-add-delay-seconds-to-chat-configs
+      author: codex
+      preConditions:
+        - onFail: HALT
+        - tableExists:
+            tableName: chat_configs
+            schemaName: bot
+        - not:
+            columnExists:
+              tableName: chat_configs
+              schemaName: bot
+              columnName: pending_response_delay_seconds
+      changes:
+        - addColumn:
+            tableName: chat_configs
+            schemaName: bot
+            columns:
+              - column:
+                  name: pending_response_delay_seconds
+                  type: INTEGER
+                  defaultValueNumeric: 0
+                  constraints:
+                    nullable: false
+                  remarks: "Minimum delay before sending queued pending response. 0 means no delay (count-only)."
+      rollback:
+        - dropColumn:
+            tableName: chat_configs
+            schemaName: bot
+            columnName: pending_response_delay_seconds

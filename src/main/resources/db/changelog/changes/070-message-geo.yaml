@@ -1,0 +1,34 @@
+databaseChangeLog:
+  - changeSet:
+      id: 070-message-geo
+      author: claude
+      comment: "Per-post geo tagging: geo column on bot.messages + audience_geo on bot.digest_personas for locale-aware news filtering (RU/UA/KZ/BY/GLOBAL)"
+      changes:
+        - addColumn:
+            tableName: messages
+            schemaName: bot
+            columns:
+              - column:
+                  name: geo
+                  type: varchar(8)
+                  constraints:
+                    nullable: true
+
+        - addColumn:
+            tableName: digest_personas
+            schemaName: bot
+            columns:
+              - column:
+                  name: audience_geo
+                  type: varchar(8)
+                  defaultValue: "GLOBAL"
+                  constraints:
+                    nullable: true
+
+        - createIndex:
+            tableName: messages
+            schemaName: bot
+            indexName: idx_messages_geo
+            columns:
+              - column:
+                  name: geo

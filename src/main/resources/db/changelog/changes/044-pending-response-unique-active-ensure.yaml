@@ -1,0 +1,27 @@
+databaseChangeLog:
+  - changeSet:
+      id: 044-pending-response-unique-active-ensure
+      author: codex
+      comment: "Ensure partial unique index exists for active pending responses (includes SENDING)"
+      preConditions:
+        - onFail: MARK_RAN
+        - tableExists:
+            schemaName: bot
+            tableName: pending_responses
+      changes:
+        - sql:
+            dbms: postgresql
+            splitStatements: false
+            stripComments: true
+            sql: |
+              DROP INDEX IF EXISTS bot.uq_pending_responses_active_trigger;
+              CREATE UNIQUE INDEX IF NOT EXISTS uq_pending_responses_active_trigger
+              ON bot.pending_responses (bot_instance_id, chat_id, triggering_message_id)
+              WHERE status IN ('PENDING', 'ELIGIBLE', 'SENDING');
+      rollback:
+        - sql:
+            dbms: postgresql
+            splitStatements: false
+            stripComments: true
+            sql: |
+              DROP INDEX IF EXISTS bot.uq_pending_responses_active_trigger;

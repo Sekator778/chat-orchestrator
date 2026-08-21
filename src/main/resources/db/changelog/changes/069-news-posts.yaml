@@ -1,0 +1,74 @@
+databaseChangeLog:
+  - changeSet:
+      id: 069-news-posts
+      author: claude
+      comment: "P1 v1 — proactive news posting: track posted items to prevent duplicates and enforce daily cap"
+      changes:
+        - createTable:
+            tableName: news_posts
+            schemaName: bot
+            columns:
+              - column:
+                  name: id
+                  type: bigserial
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: message_id
+                  type: bigint
+                  constraints:
+                    nullable: false
+              - column:
+                  name: persona_bot_id
+                  type: varchar(255)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: target_chat_id
+                  type: bigint
+                  constraints:
+                    nullable: false
+              - column:
+                  name: telegram_message_id
+                  type: bigint
+                  constraints:
+                    nullable: true
+              - column:
+                  name: value_score
+                  type: double precision
+                  constraints:
+                    nullable: true
+              - column:
+                  name: posted_at
+                  type: timestamptz
+                  defaultValueComputed: "now()"
+                  constraints:
+                    nullable: false
+              - column:
+                  name: status
+                  type: varchar(32)
+                  defaultValue: "SENT"
+                  constraints:
+                    nullable: true
+              - column:
+                  name: error_message
+                  type: text
+                  constraints:
+                    nullable: true
+        - addUniqueConstraint:
+            tableName: news_posts
+            schemaName: bot
+            columnNames: message_id, persona_bot_id, target_chat_id
+            constraintName: uq_news_posts_message_persona_chat
+        - createIndex:
+            tableName: news_posts
+            schemaName: bot
+            indexName: idx_news_posts_persona_chat_posted
+            columns:
+              - column:
+                  name: persona_bot_id
+              - column:
+                  name: target_chat_id
+              - column:
+                  name: posted_at

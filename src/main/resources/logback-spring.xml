@@ -1,0 +1,356 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+
+    <include resource="org/springframework/boot/logging/logback/base.xml"/>
+
+    <!--
+        Custom TurboFilter to suppress non-fatal TDLib "dialog date" errors.
+        This filter intercepts ALL log events BEFORE they reach any appender,
+        so it works for both file and console output.
+
+        Filtered errors:
+        - "dialog date didn't increase" - TDLib pagination state error (cosmetic, not fatal)
+        - "Last server dialog date didn't increased" - Same error, different wording
+    -->
+    <turboFilter class="com.example.telegramuserbot.config.TdLibErrorFilter"/>
+
+    <!-- Suppress logback status messages -->
+    <statusListener class="ch.qos.logback.core.status.NopStatusListener"/>
+
+    <!-- Main application log file -->
+    <appender name="FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>logs/app.log</file>
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} [%X{traceId} %X{chatId} %X{messageId} %X{pipeline}] - %msg%n</pattern>
+        </encoder>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>logs/app-%d{yyyy-MM-dd}.log</fileNamePattern>
+            <maxHistory>30</maxHistory>
+        </rollingPolicy>
+    </appender>
+
+    <!-- Telegram interactions log file -->
+    <appender name="TELEGRAM_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>logs/telegram-interactions.log</file>
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} [%X{traceId} %X{chatId} %X{messageId} %X{pipeline}] - %msg%n</pattern>
+        </encoder>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>logs/telegram-interactions-%d{yyyy-MM-dd}.log</fileNamePattern>
+            <maxHistory>30</maxHistory>
+        </rollingPolicy>
+    </appender>
+
+    <!-- Telegram connection coordinator log file -->
+    <appender name="TELEGRAM_COORDINATOR_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>logs/telegram-connection-coordinator.log</file>
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+        </encoder>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>logs/telegram-connection-coordinator-%d{yyyy-MM-dd}.log</fileNamePattern>
+            <maxHistory>30</maxHistory>
+        </rollingPolicy>
+    </appender>
+
+    <!-- LLM interactions log file -->
+    <appender name="LLM_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>logs/llm-interactions.log</file>
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} [%X{traceId} %X{chatId} %X{messageId} %X{pipeline}] - %msg%n</pattern>
+        </encoder>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>logs/llm-interactions-%d{yyyy-MM-dd}.log</fileNamePattern>
+            <maxHistory>30</maxHistory>
+        </rollingPolicy>
+    </appender>
+
+    <!-- Synchronization log file -->
+    <appender name="SYNC_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>logs/sync-operations.log</file>
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+        </encoder>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>logs/sync-operations-%d{yyyy-MM-dd}.log</fileNamePattern>
+            <maxHistory>30</maxHistory>
+        </rollingPolicy>
+    </appender>
+
+    <!-- Search functionality log file -->
+    <appender name="SEARCH_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>logs/search-operations.log</file>
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} [%X{traceId} %X{chatId} %X{messageId} %X{pipeline}] - %msg%n</pattern>
+        </encoder>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>logs/search-operations-%d{yyyy-MM-dd}.log</fileNamePattern>
+            <maxHistory>30</maxHistory>
+        </rollingPolicy>
+    </appender>
+
+    <!-- Admin and Configuration log file -->
+    <appender name="ADMIN_CONFIG_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>logs/admin-config.log</file>
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+        </encoder>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>logs/admin-config-%d{yyyy-MM-dd}.log</fileNamePattern>
+            <maxHistory>30</maxHistory>
+        </rollingPolicy>
+    </appender>
+
+    <!-- Frontend admin UI interactions log file -->
+    <appender name="FRONTEND_UI_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>logs/frontend-ui.log</file>
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+        </encoder>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>logs/frontend-ui-%d{yyyy-MM-dd}.log</fileNamePattern>
+            <maxHistory>30</maxHistory>
+        </rollingPolicy>
+    </appender>
+
+    <!-- Python Discovery and Integration log file -->
+    <appender name="PYTHON_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>logs/python-integration.log</file>
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+        </encoder>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>logs/python-integration-%d{yyyy-MM-dd}.log</fileNamePattern>
+            <maxHistory>30</maxHistory>
+        </rollingPolicy>
+    </appender>
+
+    <!-- Digest pipeline log file -->
+    <appender name="DIGEST_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>logs/digest-pipeline.log</file>
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+        </encoder>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>logs/digest-pipeline-%d{yyyy-MM-dd}.log</fileNamePattern>
+            <maxHistory>14</maxHistory>
+        </rollingPolicy>
+    </appender>
+
+    <!-- Persona reactions log file -->
+    <appender name="REACTION_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>logs/persona-reactions.log</file>
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+        </encoder>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>logs/persona-reactions-%d{yyyy-MM-dd}.log</fileNamePattern>
+            <maxHistory>30</maxHistory>
+        </rollingPolicy>
+    </appender>
+
+    <!-- Pending responses / queue log file -->
+    <appender name="PENDING_RESPONSE_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>logs/pending-responses.log</file>
+        <encoder>
+            <pattern>%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</pattern>
+        </encoder>
+        <rollingPolicy class="ch.qos.logback.core.rolling.TimeBasedRollingPolicy">
+            <fileNamePattern>logs/pending-responses-%d{yyyy-MM-dd}.log</fileNamePattern>
+            <maxHistory>30</maxHistory>
+        </rollingPolicy>
+    </appender>
+
+    <!-- Spring properties for configurable log levels -->
+    <springProperty scope="context" name="telegramLogLevel" source="logging.level.com.example.telegramuserbot.telegram" defaultValue="INFO"/>
+    <springProperty scope="context" name="llmLogLevel" source="logging.level.com.example.telegramuserbot.llm" defaultValue="INFO"/>
+    <springProperty scope="context" name="syncLogLevel" source="logging.level.com.example.telegramuserbot.sync" defaultValue="INFO"/>
+    <springProperty scope="context" name="searchLogLevel" source="logging.level.com.example.telegramuserbot.search" defaultValue="INFO"/>
+    <springProperty scope="context" name="adminConfigLogLevel" source="logging.level.com.example.telegramuserbot.adminconfig" defaultValue="INFO"/>
+    <springProperty scope="context" name="pythonLogLevel" source="logging.level.com.example.telegramuserbot.python" defaultValue="INFO"/>
+    <springProperty scope="context" name="pendingResponseLogLevel" source="logging.level.com.example.telegramuserbot.queue" defaultValue="INFO"/>
+    <springProperty scope="context" name="messagePersistenceLogLevel" source="logging.level.com.example.telegramuserbot.service.persistence.MessagePersistenceServiceImpl" defaultValue="INFO"/>
+
+    <!-- Loggers for specific functional areas -->
+    <logger name="com.example.telegramuserbot.service.TelegramListenerService" level="${telegramLogLevel}" additivity="false">
+        <appender-ref ref="TELEGRAM_FILE"/>
+        <appender-ref ref="SYNC_FILE"/>
+        <appender-ref ref="FILE"/>
+    </logger>
+    <logger name="com.example.telegramuserbot.service.BotInfoService" level="${telegramLogLevel}" additivity="false">
+        <appender-ref ref="TELEGRAM_FILE"/>
+    </logger>
+    <logger name="com.example.telegramuserbot.controller.TelegramDebugController" level="${telegramLogLevel}" additivity="false">
+        <appender-ref ref="TELEGRAM_FILE"/>
+    </logger>
+    <logger name="com.example.telegramuserbot.config.BotConfig" level="${telegramLogLevel}" additivity="false">
+        <appender-ref ref="TELEGRAM_FILE"/>
+    </logger>
+
+    <logger name="com.example.telegramuserbot.service.TelegramConnectionCoordinator" level="INFO">
+        <appender-ref ref="TELEGRAM_COORDINATOR_FILE"/>
+    </logger>
+
+    <logger name="com.example.telegramuserbot.service.llm" level="${llmLogLevel}" additivity="false">
+        <appender-ref ref="LLM_FILE"/>
+    </logger>
+    <logger name="com.example.telegramuserbot.service.humanization" level="${llmLogLevel}" additivity="false">
+        <appender-ref ref="LLM_FILE"/>
+    </logger>
+    <logger name="llm.payload" level="INFO" additivity="false">
+        <appender-ref ref="LLM_FILE"/>
+    </logger>
+
+    <logger name="com.example.telegramuserbot.service.sync" level="${syncLogLevel}" additivity="false">
+        <appender-ref ref="SYNC_FILE"/>
+    </logger>
+    <logger name="com.example.telegramuserbot.service.startup" level="${syncLogLevel}" additivity="false">
+        <appender-ref ref="SYNC_FILE"/>
+    </logger>
+    <logger name="com.example.telegramuserbot.service.messagesync" level="${syncLogLevel}" additivity="false">
+        <appender-ref ref="SYNC_FILE"/>
+    </logger>
+    <logger name="com.example.telegramuserbot.scheduler.MessageSyncScheduler" level="${syncLogLevel}" additivity="false">
+        <appender-ref ref="SYNC_FILE"/>
+    </logger>
+    <logger name="com.example.telegramuserbot.service.cache.SyncEnabledChatsCache" level="${syncLogLevel}" additivity="false">
+        <appender-ref ref="SYNC_FILE"/>
+    </logger>
+    <logger name="com.example.telegramuserbot.controller.SyncController" level="${syncLogLevel}" additivity="false">
+        <appender-ref ref="SYNC_FILE"/>
+    </logger>
+    <logger name="com.example.telegramuserbot.controller.StartupSyncController" level="${syncLogLevel}" additivity="false">
+        <appender-ref ref="SYNC_FILE"/>
+    </logger>
+
+    <logger name="com.example.telegramuserbot.service.search" level="${searchLogLevel}" additivity="false">
+        <appender-ref ref="SEARCH_FILE"/>
+    </logger>
+    <logger name="com.example.telegramuserbot.controller.SearchController" level="${searchLogLevel}" additivity="false">
+        <appender-ref ref="SEARCH_FILE"/>
+    </logger>
+    <logger name="frontend.ui" level="INFO" additivity="false">
+        <appender-ref ref="FRONTEND_UI_FILE"/>
+    </logger>
+
+    <logger name="com.example.telegramuserbot.service.admin" level="${adminConfigLogLevel}" additivity="false">
+        <appender-ref ref="ADMIN_CONFIG_FILE"/>
+    </logger>
+    <logger name="com.example.telegramuserbot.service.config" level="${adminConfigLogLevel}" additivity="false">
+        <appender-ref ref="ADMIN_CONFIG_FILE"/>
+    </logger>
+    <logger name="com.example.telegramuserbot.controller.AdminController" level="${adminConfigLogLevel}" additivity="false">
+        <appender-ref ref="ADMIN_CONFIG_FILE"/>
+    </logger>
+    <logger name="com.example.telegramuserbot.controller.ConfigController" level="${adminConfigLogLevel}" additivity="false">
+        <appender-ref ref="ADMIN_CONFIG_FILE"/>
+    </logger>
+    <logger name="com.example.telegramuserbot.controller.PersonaController" level="${adminConfigLogLevel}" additivity="false">
+        <appender-ref ref="ADMIN_CONFIG_FILE"/>
+    </logger>
+
+    <!-- Orchestration (prompt building, pipelines) to LLM log -->
+    <logger name="com.example.telegramuserbot.service.orchestration" level="${llmLogLevel}" additivity="false">
+        <appender-ref ref="LLM_FILE"/>
+        <appender-ref ref="FILE"/>
+    </logger>
+
+    <!-- Response rate limit gate (fast-fail + daily counters) -->
+    <logger name="com.example.telegramuserbot.service.ratelimit" level="${llmLogLevel}" additivity="false">
+        <appender-ref ref="LLM_FILE"/>
+        <appender-ref ref="FILE"/>
+    </logger>
+
+    <!-- Python integration and discovery workflow loggers -->
+    <logger name="com.example.telegramuserbot.service.python" level="${pythonLogLevel}" additivity="false">
+        <appender-ref ref="PYTHON_FILE"/>
+    </logger>
+    <logger name="com.example.telegramuserbot.scheduler.PythonWorkflowScheduler" level="${pythonLogLevel}" additivity="false">
+        <appender-ref ref="PYTHON_FILE"/>
+    </logger>
+    <logger name="com.example.telegramuserbot.controller.PythonWorkflowController" level="${pythonLogLevel}" additivity="false">
+        <appender-ref ref="PYTHON_FILE"/>
+    </logger>
+    <logger name="com.example.telegramuserbot.service.ranking" level="${pythonLogLevel}" additivity="false">
+        <appender-ref ref="PYTHON_FILE"/>
+    </logger>
+
+    <!-- Bootstrap and primary-instance routing -->
+    <logger name="com.example.telegramuserbot.config.BotInstanceProvider" level="INFO" additivity="false">
+        <appender-ref ref="TELEGRAM_FILE"/>
+        <appender-ref ref="FILE"/>
+    </logger>
+    <logger name="com.example.telegramuserbot.service.TelegramClientManager" level="INFO" additivity="false">
+        <appender-ref ref="TELEGRAM_FILE"/>
+        <appender-ref ref="FILE"/>
+    </logger>
+    <logger name="com.example.telegramuserbot.config.TelegramClientConfig" level="INFO" additivity="false">
+        <appender-ref ref="TELEGRAM_FILE"/>
+        <appender-ref ref="FILE"/>
+    </logger>
+
+    <!-- Join/subscribe operations should be easy to find -->
+    <logger name="com.example.telegramuserbot.service.channels.pipeline.ChannelIngestionServiceImpl" level="INFO" additivity="false">
+        <appender-ref ref="TELEGRAM_FILE"/>
+        <appender-ref ref="SYNC_FILE"/>
+        <appender-ref ref="FILE"/>
+    </logger>
+    <logger name="com.example.telegramuserbot.service.maintenance.PrimaryChannelLinkService" level="INFO" additivity="false">
+        <appender-ref ref="TELEGRAM_FILE"/>
+        <appender-ref ref="SYNC_FILE"/>
+        <appender-ref ref="FILE"/>
+    </logger>
+
+    <logger name="com.example.telegramuserbot.service.queue" level="${pendingResponseLogLevel}" additivity="false">
+        <appender-ref ref="PENDING_RESPONSE_FILE"/>
+        <appender-ref ref="FILE"/>
+    </logger>
+
+    <logger name="com.example.telegramuserbot.service.persistence.MessagePersistenceServiceImpl" level="${messagePersistenceLogLevel}" additivity="false">
+        <appender-ref ref="FILE"/>
+        <appender-ref ref="SYNC_FILE"/>
+    </logger>
+
+    <logger name="com.example.telegramuserbot.scheduler.EventPublisherScheduler" level="ERROR" additivity="false">
+        <appender-ref ref="FILE"/>
+    </logger>
+
+    <logger name="com.example.telegramuserbot.scheduler.EventWatcherScheduler" level="ERROR" additivity="false">
+        <appender-ref ref="FILE"/>
+    </logger>
+
+    <!-- Digest pipeline: message selection, LLM prompts, responses -->
+    <logger name="com.example.telegramuserbot.service.digest" level="INFO" additivity="false">
+        <appender-ref ref="DIGEST_FILE"/>
+        <appender-ref ref="FILE"/>
+    </logger>
+    <logger name="com.example.telegramuserbot.controller.DigestController" level="INFO" additivity="false">
+        <appender-ref ref="DIGEST_FILE"/>
+        <appender-ref ref="FILE"/>
+    </logger>
+
+    <!-- Persona reaction flow (detection, scheduling, execution) -->
+    <logger name="com.example.telegramuserbot.service.reaction" level="INFO" additivity="false">
+        <appender-ref ref="REACTION_FILE"/>
+        <appender-ref ref="FILE"/>
+    </logger>
+    <logger name="com.example.telegramuserbot.scheduler.ReactionExecutorScheduler" level="INFO" additivity="false">
+        <appender-ref ref="REACTION_FILE"/>
+        <appender-ref ref="FILE"/>
+    </logger>
+    <logger name="com.example.telegramuserbot.controller.PersonaReactionController" level="INFO" additivity="false">
+        <appender-ref ref="REACTION_FILE"/>
+        <appender-ref ref="FILE"/>
+    </logger>
+
+    <!-- Suppress noisy warnings from TDLib native library (e.g. duplicate editable usernames from Telegram servers) -->
+    <logger name="tdlib" level="ERROR" additivity="false">
+        <appender-ref ref="FILE"/>
+    </logger>
+
+    <!-- Root logger for all other logs -->
+    <root level="INFO">
+        <appender-ref ref="FILE"/>
+    </root>
+
+</configuration>

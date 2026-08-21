@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+# Least-privilege token: CI only reads code and reports a status check.
+permissions:
+  contents: read
+
+# Cancel superseded runs on the same ref to avoid stale checks and wasted runner minutes.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build & Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7
+
+      - name: Set up JDK 21 (Temurin) with Maven cache
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+          # Cache keyed on pom.xml hash; invalidates automatically when dependencies change.
+          cache: maven
+
+      - name: Build and run unit tests
+        # Integration tests (*IntegrationTest, *EndToEndTest) require Docker-backed Postgres
+        # and Kafka; they are already excluded by maven-surefire-plugin in pom.xml and do
+        # NOT run in this workflow. Override the TDLight native classifier for the Linux runner.
+        run: mvn -B -ntp verify -Dtdlight.native.classifier=linux_amd64_gnu_ssl3

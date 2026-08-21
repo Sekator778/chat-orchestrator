@@ -1,0 +1,170 @@
+databaseChangeLog:
+  - changeSet:
+      id: 028-01-add-composite-indexes-for-joins
+      author: system-optimizer
+      comment: Add composite indexes to optimize JOIN performance for config-related queries
+      changes:
+        # Optimize TriggerCondition queries with JOIN on chat_config_id
+        - createIndex:
+            indexName: idx_trigger_conditions_config_active_priority
+            schemaName: bot
+            tableName: trigger_conditions
+            columns:
+              - column:
+                  name: chat_config_id
+              - column:
+                  name: active
+              - column:
+                  name: priority
+                  descending: true
+
+        # Optimize TopicRestriction queries with JOIN on chat_config_id
+        - createIndex:
+            indexName: idx_topic_restrictions_config_active
+            schemaName: bot
+            tableName: topic_restrictions
+            columns:
+              - column:
+                  name: chat_config_id
+              - column:
+                  name: active
+
+        # Optimize ContextSettings queries with JOIN on chat_config_id
+        - createIndex:
+            indexName: idx_context_settings_config_id
+            schemaName: bot
+            tableName: context_settings
+            columns:
+              - column:
+                  name: chat_config_id
+
+        # Optimize RateLimits queries with JOIN on chat_config_id
+        - createIndex:
+            indexName: idx_rate_limits_config_id
+            schemaName: bot
+            tableName: rate_limits
+            columns:
+              - column:
+                  name: chat_config_id
+
+        # Optimize ResponseTemplate queries with JOIN on chat_config_id
+        - createIndex:
+            indexName: idx_response_templates_config_active_priority
+            schemaName: bot
+            tableName: response_templates
+            columns:
+              - column:
+                  name: chat_config_id
+              - column:
+                  name: active
+              - column:
+                  name: priority
+                  descending: true
+
+        # Optimize LlmParameters queries with JOIN on chat_config_id
+        - createIndex:
+            indexName: idx_llm_parameters_config_id
+            schemaName: bot
+            tableName: llm_parameters
+            columns:
+              - column:
+                  name: chat_config_id
+
+  - changeSet:
+      id: 028-02-optimize-message-queries
+      author: system-optimizer
+      comment: Add composite indexes to optimize message lookup queries for high-volume parallel processing
+      changes:
+        # Optimize chat_id + message_id lookups (most frequent query)
+        - createIndex:
+            indexName: idx_messages_chat_msg_id
+            schemaName: bot
+            tableName: messages
+            columns:
+              - column:
+                  name: chat_id
+              - column:
+                  name: message_id
+
+        # Optimize chat_id + telegram_message_id lookups
+        - createIndex:
+            indexName: idx_messages_chat_telegram_id
+            schemaName: bot
+            tableName: messages
+            columns:
+              - column:
+                  name: chat_id
+              - column:
+                  name: telegram_message_id
+
+        # Optimize outgoing message queries with date range
+        - createIndex:
+            indexName: idx_messages_chat_outgoing_date
+            schemaName: bot
+            tableName: messages
+            columns:
+              - column:
+                  name: chat_id
+              - column:
+                  name: is_outgoing
+              - column:
+                  name: date
+                  descending: true
+
+        # Optimize sender queries with date range (for bot message deletion)
+        - createIndex:
+            indexName: idx_messages_chat_sender_outgoing_date
+            schemaName: bot
+            tableName: messages
+            columns:
+              - column:
+                  name: chat_id
+              - column:
+                  name: sender_id
+              - column:
+                  name: is_outgoing
+              - column:
+                  name: date
+
+        # Optimize date-based context queries
+        - createIndex:
+            indexName: idx_messages_chat_date_asc
+            schemaName: bot
+            tableName: messages
+            columns:
+              - column:
+                  name: chat_id
+              - column:
+                  name: date
+
+  - changeSet:
+      id: 028-03-optimize-chat-config-queries
+      author: system-optimizer
+      comment: Add index for channel_chat_id lookups to optimize config queries
+      changes:
+        # PRIMARY lookup index for chat configs (used in all JOIN queries)
+        - createIndex:
+            indexName: idx_chat_configs_channel_chat_id
+            schemaName: bot
+            tableName: chat_configs
+            unique: true
+            columns:
+              - column:
+                  name: channel_chat_id
+
+  - changeSet:
+      id: 028-04-analyze-tables
+      author: system-optimizer
+      comment: Update table statistics for query planner optimization
+      changes:
+        - sql:
+            dbms: postgresql
+            sql: |
+              ANALYZE bot.messages;
+              ANALYZE bot.chat_configs;
+              ANALYZE bot.trigger_conditions;
+              ANALYZE bot.topic_restrictions;
+              ANALYZE bot.response_templates;
+              ANALYZE bot.rate_limits;
+              ANALYZE bot.llm_parameters;
+              ANALYZE bot.context_settings;

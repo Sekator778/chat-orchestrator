@@ -1,0 +1,21 @@
+databaseChangeLog:
+  - changeSet:
+      id: 2026-06-10-persona-chat-reply-probability
+      author: claude
+      changes:
+        - addColumn:
+            tableName: persona_chat_bindings
+            schemaName: bot
+            columns:
+              - column:
+                  name: reply_probability
+                  type: DOUBLE PRECISION
+                  defaultValueNumeric: 0.5
+                  remarks: >-
+                    Per-(persona, chat) chance this persona chimes in on a
+                    reply-worthy message (0.0-1.0). Each persona decides for
+                    itself — there is no global responder cap. Conservative
+                    default so a many-persona chat does not N× every message;
+                    raise it for "main" personas of a chat.
+                  constraints:
+                    nullable: false

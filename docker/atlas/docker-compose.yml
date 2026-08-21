@@ -1,0 +1,109 @@
+# Minimal local stack for chat-orchestrator on atlas (Apple Silicon).
+#
+# Differences from the staging stand (docker/staging/docker-compose.staging.yml)
+# this replaces on this machine:
+#   - app         -> NOT a container. The fat jar runs natively on the Mac
+#                    (JDK 21, TDLight classifier macos_arm64), started by
+#                    bin/orchstack.sh app start. Only infra lives here.
+#   - embeddings  -> dropped. The TEI service serving BAAI/bge-m3 already runs
+#                    natively on this machine at 127.0.0.1:8087, the same model
+#                    staging uses; a second 2 GB model copy buys nothing.
+#   - ports       -> everything published on 127.0.0.1 and shifted off the ports
+#                    other local stacks on this machine already hold
+#                    (1522/9092, 6333, 6343).
+#
+# Postgres stays Postgres: the winbox pg_dump has to restore 1:1, so there is no
+# Oracle conversion here (unlike that stack's port).
+#
+# Everything binds to 127.0.0.1 only and carries no restart policy: the stack
+# exists while `orchstack.sh up` says so and is gone after `down`.
+name: chat-orchestrator
+
+services:
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: tg-orch-postgres
+    ports:
+      - "127.0.0.1:5433:5432"
+    environment:
+      # Database and role are the staging ones on purpose - the pg_dump coming
+      # from winbox then restores without renaming anything. The password is
+      # local-only; the port is not reachable from off this machine.
+      POSTGRES_DB: news_aggregator_db
+      POSTGRES_USER: staging
+      POSTGRES_PASSWORD: staging
+    volumes:
+      # Liquibase owns every object but not the schemas themselves.
+      - ./init-db.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U staging -d news_aggregator_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    mem_limit: 1g
+    restart: "no"
+
+  # Kafka-wire broker, same image and dev-container mode as staging (v24.2.18
+  # publishes an arm64 manifest, verified before this file was written).
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v24.2.18
+    container_name: tg-orch-redpanda
+    ports:
+      - "127.0.0.1:9094:9094"
+    command:
+      - redpanda
+      - start
+      # The app runs on the host, not on this network, so what matters is the
+      # external listener: it binds 9094 inside the container, is published on
+      # 127.0.0.1:9094, and advertises itself as localhost:9094 - the address the
+      # host JVM dials. Advertising the container name instead (staging's
+      # internal listener) would make the bootstrap succeed and every produce
+      # fail on an unresolvable broker.
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:9094
+      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:9094
+      - --mode dev-container
+      - --default-log-level warn
+    volumes:
+      - redpanda_data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -Eq 'Healthy:.*true' || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 18
+      start_period: 15s
+    mem_limit: 2g
+    restart: "no"
+
+  qdrant:
+    image: qdrant/qdrant:v1.12.4
+    container_name: tg-orch-qdrant
+    ports:
+      - "127.0.0.1:6335:6333"
+    # Qdrant + RocksDB open many file handles (one+ per segment). The Docker
+    # default soft limit of 1024 was exhausted on staging by the news-embedding
+    # backfill - "Too many open files (os error 24)", the app saw HTTP 000 and
+    # embedding stalled silently. Same limit here.
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - qdrant_data:/qdrant/storage
+    # The image carries bash but neither curl nor wget, so the readiness probe
+    # is a bash /dev/tcp connect against the REST port.
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/6333"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+    mem_limit: 2g
+    restart: "no"
+
+volumes:
+  pgdata:
+  redpanda_data:
+  qdrant_data:

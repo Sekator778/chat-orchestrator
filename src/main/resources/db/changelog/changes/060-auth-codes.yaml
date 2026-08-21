@@ -1,0 +1,56 @@
+databaseChangeLog:
+  - changeSet:
+      id: 2026-06-10-auth-codes-table
+      author: claude
+      changes:
+        - createTable:
+            tableName: auth_codes
+            schemaName: bot
+            remarks: >-
+              Headless login: the owner submits a Telegram verification code (or
+              2FA password) through the admin API; the client picks it up here
+              instead of reading the container console.
+            columns:
+              - column:
+                  name: id
+                  type: BIGSERIAL
+                  constraints:
+                    primaryKey: true
+              - column:
+                  name: bot_id
+                  type: VARCHAR(64)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: kind
+                  type: VARCHAR(16)
+                  defaultValue: CODE
+                  remarks: CODE (login code) or PASSWORD (2FA)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: value
+                  type: TEXT
+                  constraints:
+                    nullable: false
+              - column:
+                  name: consumed
+                  type: BOOLEAN
+                  defaultValueBoolean: false
+                  constraints:
+                    nullable: false
+              - column:
+                  name: created_at
+                  type: TIMESTAMPTZ
+                  defaultValueDate: CURRENT_TIMESTAMP
+        - createIndex:
+            indexName: idx_auth_codes_lookup
+            tableName: auth_codes
+            schemaName: bot
+            columns:
+              - column:
+                  name: bot_id
+              - column:
+                  name: kind
+              - column:
+                  name: consumed

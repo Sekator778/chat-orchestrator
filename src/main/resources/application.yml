@@ -1,0 +1,404 @@
+# =============================================================================
+# BASE CONFIGURATION - Common settings for all environments
+# =============================================================================
+# This file contains non-sensitive configuration shared across environments.
+# Sensitive data should be provided via environment variables or external config.
+
+server:
+  port: ${SERVER_PORT:8099}
+  shutdown: graceful
+
+app:
+  http:
+    enabled: ${APP_HTTP_ENABLED:false}
+
+springdoc:
+  api-docs:
+    enabled: ${app.http.enabled:false}
+  swagger-ui:
+    enabled: ${app.http.enabled:false}
+
+# External API Configuration (credentials via environment variables)
+deepseek:
+  apiKey: ${DEEPSEEK_API_KEY:}
+  apiUrl: ${DEEPSEEK_API_URL:https://api.deepseek.com/chat/completions}
+  model: ${DEEPSEEK_MODEL:deepseek-chat}
+  historyLimit: ${DEEPSEEK_HISTORY_LIMIT:30}
+  contextLimit: ${DEEPSEEK_CONTEXT_LIMIT:10}
+  requestTimeoutSeconds: ${DEEPSEEK_TIMEOUT:90}
+  default:
+    maxTokens: ${DEEPSEEK_MAX_TOKENS:1000}
+    temperature: ${DEEPSEEK_TEMPERATURE:0.7}
+
+# Enhanced LLM Service Configuration
+llm:
+  service:
+    enhanced:
+      enabled: true        # Enable enhanced LLM service with templates and personalization
+    humanization:
+      enabled: ${LLM_HUMANIZATION_ENABLED:true}
+    multiStage:
+      enabled: ${LLM_MULTI_STAGE_ENABLED:true}
+
+# Telegram API Configuration (credentials via environment variables)
+telegram:
+  api:
+    id: ${TELEGRAM_API_ID:}
+    hash: ${TELEGRAM_API_HASH:}
+  phoneNumber: ${TELEGRAM_PHONE_NUMBER:}
+  sessionDirectory: ${TELEGRAM_SESSION_DIR:./sessions}
+
+bot:
+  persona-ids: "[2000000001]"
+  # Human-like reply timing. random-delay.max-ms <= 0 keeps the legacy typing-only
+  # behavior; set it > 0 to add a random, per-persona-staggered pre-send delay for
+  # the test chat only (test-chat-id). Other chats are never affected.
+  reply-timing:
+    test-chat-id: ${BOT_REPLY_TIMING_TEST_CHAT_ID:-4964162923}
+    typing:
+      ms-per-char: ${BOT_REPLY_TYPING_MS_PER_CHAR:60}
+      cap-ms: ${BOT_REPLY_TYPING_CAP_MS:8000}
+    random-delay:
+      min-ms: ${BOT_REPLY_RANDOM_DELAY_MIN_MS:0}
+      max-ms: ${BOT_REPLY_RANDOM_DELAY_MAX_MS:0}
+    stagger:
+      step-ms: ${BOT_REPLY_STAGGER_STEP_MS:3000}
+  # ResponseDecisionEngine gate — all flags OFF by default (zero runtime change until enabled).
+  # enabled:          run analyze()+decide() before persona fan-out; mute on shouldRespond=false
+  # shape-replies:    apply tone/length/intent/delay directives from decision into the prompt
+  # fail-open:        on analyze/decide error or empty context → PROCEED (mute-averse)
+  # cooldown-enabled: allow bot-detection to auto-activate mute-cooldown (landmine guard)
+  decision-gate:
+    enabled: ${BOT_DECISION_GATE_ENABLED:false}
+    shape-replies: ${BOT_DECISION_GATE_SHAPE_REPLIES:false}
+    fail-open: ${BOT_DECISION_GATE_FAIL_OPEN:true}
+    cooldown-enabled: ${BOT_DECISION_GATE_COOLDOWN_ENABLED:false}
+
+# TDLib Configuration
+tdlib:
+  databaseDirectory: ${TDLIB_DB_DIR:./tdlib_db}
+  filesDirectory: ${TDLIB_FILES_DIR:./tdlib_files}
+
+# Spring Framework Configuration
+spring:
+  application:
+    name: telegram-userbot
+
+  cache:
+    type: caffeine
+    caffeine:
+      spec: expireAfterWrite=30m
+
+  # R2DBC Configuration
+  r2dbc:
+    url: r2dbc:postgresql://${DATABASE_HOST:localhost}:${DATABASE_PORT:5432}/${DATABASE_NAME:news_aggregator_db}?schema=tgscan,bot,public
+    username: ${DATABASE_USERNAME:}
+    password: ${DATABASE_PASSWORD:}
+    pool:
+      enabled: true
+      initial-size: 10
+      max-size: ${DATABASE_POOL_SIZE:50}
+      max-idle-time: 30m
+      max-acquire-time: 60s
+      max-create-connection-time: 60s
+      validation-query: "SELECT 1"
+
+  # Liquibase Configuration (still requires JDBC)
+  liquibase:
+    change-log: classpath:db/changelog/db.changelog-master.yaml
+    enabled: ${LIQUIBASE_ENABLED:true}
+    url: jdbc:postgresql://${DATABASE_HOST:localhost}:${DATABASE_PORT:5432}/${DATABASE_NAME:news_aggregator_db}?currentSchema=bot
+    user: ${DATABASE_USERNAME:}
+    password: ${DATABASE_PASSWORD:}
+    default-schema: bot
+    # Exclude test fixtures by default: contextless (real) changesets always run;
+    # 'test-seed' ones (e.g. the test-chat seed 055) only run where the context
+    # is explicitly enabled (staging). Prod/dev/smoke never seed the test chat.
+    contexts: ${LIQUIBASE_CONTEXTS:!test-seed}
+
+  # Kafka Configuration
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: ${KAFKA_CONSUMER_GROUP:telegram-user-bot}
+      auto-offset-reset: ${KAFKA_AUTO_OFFSET_RESET:earliest}
+      enable-auto-commit: false
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+
+# Application-specific Configuration
+kafka:
+  topic:
+    incoming-messages: ${KAFKA_TOPIC_INCOMING:telegram}
+
+# Media Storage Configuration
+media:
+  storageDirectory: ${MEDIA_STORAGE_DIR:./media}
+  maxFileSize: ${MEDIA_MAX_FILE_SIZE:50MB}
+  allowedTypes: ${MEDIA_ALLOWED_TYPES:image/*,video/*,audio/*,application/pdf}
+
+# Logging Configuration
+logging:
+  level:
+    root: ${LOG_LEVEL_ROOT:INFO}
+    org.springframework: WARN
+    com.example.telegramuserbot: ${LOG_LEVEL_APP:DEBUG}
+    com.example.telegramuserbot.service: ${LOG_LEVEL_SERVICE:DEBUG}
+    com.example.telegramuserbot.service.decision: DEBUG
+    com.example.telegramuserbot.service.generation: DEBUG
+    com.example.telegramuserbot.service.orchestration: DEBUG
+    org.springframework.web: ${LOG_LEVEL_WEB:DEBUG}
+    org.hibernate.SQL: ${LOG_LEVEL_SQL:WARN}
+    org.hibernate.type.descriptor.sql: WARN
+    org.apache.kafka: WARN
+    liquibase: WARN
+    io.r2dbc.pool: WARN
+    org.springframework.kafka.listener.KafkaMessageListenerContainer: ${LOG_LEVEL_KAFKA:ERROR}
+
+# Humanization Configuration
+humanization:
+  # Anti-detection settings
+  anti-detection:
+    enabled: ${HUMANIZATION_ANTI_DETECTION_ENABLED:true}
+    emergency-threshold: ${HUMANIZATION_EMERGENCY_THRESHOLD:0.7}
+    pattern-reset-interval: ${HUMANIZATION_PATTERN_RESET_INTERVAL:24h}
+
+  # Response timing settings
+  timing:
+    min-delay: ${HUMANIZATION_MIN_DELAY:1000}
+    max-delay: ${HUMANIZATION_MAX_DELAY:8000}
+    typing-speed: ${HUMANIZATION_TYPING_SPEED:50}  # ms per character
+    variation-factor: ${HUMANIZATION_VARIATION_FACTOR:0.3}
+
+  # User profiling settings
+  profiling:
+    min-messages-for-reliability: ${HUMANIZATION_MIN_MESSAGES:10}
+    confidence-threshold: ${HUMANIZATION_CONFIDENCE_THRESHOLD:0.2}
+    profile-update-enabled: ${HUMANIZATION_PROFILE_UPDATE:true}
+
+  # Response variation settings
+  variations:
+    weight-randomization: ${HUMANIZATION_WEIGHT_RANDOMIZATION:true}
+    usage-tracking: ${HUMANIZATION_USAGE_TRACKING:true}
+    max-recent-usage-hours: ${HUMANIZATION_MAX_RECENT_HOURS:1}
+
+# Startup Chat Synchronization Configuration
+startup:
+  sync:
+    enabled: ${STARTUP_SYNC_ENABLED:true}
+    default-depth-days: ${STARTUP_SYNC_DEPTH_DAYS:30}
+    max-concurrent-syncs: ${STARTUP_SYNC_MAX_CONCURRENT:3}
+    timeout-minutes: ${STARTUP_SYNC_TIMEOUT_MINUTES:60}
+    discovery-method: ${STARTUP_SYNC_DISCOVERY_METHOD:database}  # Options: database, tdlib
+
+# Scheduler Configuration
+scheduler:
+  chat-discovery:
+    enabled: ${SCHEDULER_CHAT_DISCOVERY_ENABLED:true}
+    timeout-minutes: ${SCHEDULER_CHAT_DISCOVERY_TIMEOUT:10}
+
+# Channel discovery — F0a (keyword search) and F0b (slow join + mute)
+# F0a: enabled by default (read-only, records candidates only, no joining)
+# F0b: DISABLED BY DEFAULT — auto-joining is the #1 Telegram ban trigger.
+#       The owner must opt in explicitly: channel-discovery.join.enabled=true
+channel-discovery:
+  search:
+    enabled: ${CHANNEL_DISCOVERY_SEARCH_ENABLED:true}
+    interval-ms: ${CHANNEL_DISCOVERY_SEARCH_INTERVAL_MS:86400000}    # 24 hours
+    initial-delay-ms: ${CHANNEL_DISCOVERY_SEARCH_INITIAL_DELAY_MS:300000}  # 5 min
+  join:
+    enabled: ${CHANNEL_DISCOVERY_JOIN_ENABLED:false}
+    interval-ms: ${CHANNEL_DISCOVERY_JOIN_INTERVAL_MS:14400000}      # 4 hours
+    initial-delay-ms: ${CHANNEL_DISCOVERY_JOIN_INITIAL_DELAY_MS:600000}  # 10 min
+    batch-size: ${CHANNEL_DISCOVERY_JOIN_BATCH_SIZE:2}
+
+# Response rate limits (response pipeline)
+rate-limits:
+  daily-reset:
+    cron: ${RATE_LIMITS_DAILY_RESET_CRON:0 0 2 * * ?}
+    zone: ${RATE_LIMITS_DAILY_RESET_ZONE:Europe/Berlin}
+  daily:
+    block-cache:
+      max-minutes: ${RATE_LIMITS_DAILY_BLOCK_CACHE_MAX_MINUTES:1440}
+
+# Python Scanner Integration Configuration
+# Disabled by default: the scanner directory is not part of this repository, so the
+# scheduler fails on every run when enabled without a locally provisioned scanner.
+python:
+  scheduler:
+    enabled: ${PYTHON_SCHEDULER_ENABLED:false}
+    concurrent-execution: ${PYTHON_CONCURRENT_EXECUTION:false}
+    full-workflow:
+      rate: ${PYTHON_FULL_WORKFLOW_RATE:7200000}  # 2 hours
+    daily-maintenance:
+      cron: ${PYTHON_DAILY_MAINTENANCE_CRON:0 0 3 * * ?}  # 3:00 AM daily
+  scanner:
+    directory: ${PYTHON_SCANNER_DIR:./Telegram_scaner}
+    timeout-minutes: ${PYTHON_TIMEOUT_MINUTES:30}
+    docker:
+      enabled: ${PYTHON_DOCKER_ENABLED:true}
+
+# Events & Alerts Configuration (Stage 2.x + 3)
+events:
+  watcher:
+    enabled: ${EVENTS_WATCHER_ENABLED:true}
+    poll-interval-ms: ${EVENTS_POLL_INTERVAL:30000}  # 30 seconds
+    min-confidence: ${EVENTS_MIN_CONFIDENCE:0.5}
+    min-severity: ${EVENTS_MIN_SEVERITY:medium}       # Options: low, medium, high
+    batch-size: ${EVENTS_BATCH_SIZE:10}
+    ttl-minutes: ${EVENTS_TTL_MINUTES:10}             # Deduplication window
+  publisher:
+    enabled: ${EVENTS_PUBLISHER_ENABLED:true}
+    poll-interval-ms: ${EVENTS_PUBLISHER_POLL_INTERVAL:5000}  # 5 seconds
+    batch-size: ${EVENTS_PUBLISHER_BATCH_SIZE:10}
+
+# Pipeline Observability Configuration
+pipeline:
+  observability:
+    enabled: ${PIPELINE_OBSERVABILITY_ENABLED:true}
+    alert-chat-id: ${PIPELINE_ALERT_CHAT_ID:0}           # Set to a Telegram chat ID to receive anomaly alerts
+    snapshot-interval-ms: ${PIPELINE_SNAPSHOT_INTERVAL_MS:21600000}  # 6 hours
+    distribution-cron: ${PIPELINE_DISTRIBUTION_CRON:0 0 7 * * *}     # 07:00 daily
+    snapshot-retention-days: ${PIPELINE_SNAPSHOT_RETENTION_DAYS:30}
+
+# Pending Response Queue Configuration
+pending-response:
+  scheduler:
+    enabled: ${PENDING_RESPONSE_SCHEDULER_ENABLED:true}
+    initial-delay-ms: ${PENDING_RESPONSE_INITIAL_DELAY:10000}           # 10 seconds
+    check-eligible-interval-ms: ${PENDING_RESPONSE_CHECK_INTERVAL:30000}  # 30 seconds - check for eligible responses
+    mark-expired-interval-ms: ${PENDING_RESPONSE_EXPIRE_INTERVAL:300000}  # 5 minutes - mark expired responses
+    cleanup-interval-ms: ${PENDING_RESPONSE_CLEANUP_INTERVAL:3600000}     # 1 hour - cleanup expired from DB
+    check-threshold-interval-ms: ${PENDING_RESPONSE_THRESHOLD_INTERVAL:60000}  # 1 minute - check threshold reached
+
+# Message Clustering Configuration
+clustering:
+  job:
+    enabled: ${CLUSTERING_JOB_ENABLED:false}
+    interval-ms: ${CLUSTERING_INTERVAL_MS:3600000}
+    primary-interval-ms: ${CLUSTERING_PRIMARY_INTERVAL_MS:7200000}
+    window-hours: ${CLUSTERING_WINDOW_HOURS:24}
+
+# Unified ranking brain recompute: runs bot.fn_recompute_importance() on a schedule.
+# All formula coefficients live in bot.app_settings (runtime-tunable, no redeploy).
+# Off by default; staging turns it on via RANKING_RECOMPUTE_ENABLED=true.
+ranking:
+  recompute:
+    enabled: ${RANKING_RECOMPUTE_ENABLED:false}
+    interval-ms: ${RANKING_RECOMPUTE_INTERVAL_MS:3600000}
+    initial-delay-ms: ${RANKING_RECOMPUTE_INITIAL_DELAY_MS:120000}
+
+# Scheduled scoring refresh (tgscan.fn_refresh_all): keeps importance decay,
+# channel reliability and top aggregations current. Off by default; staging
+# turns it on.
+scoring:
+  refresh:
+    enabled: ${SCORING_REFRESH_ENABLED:false}
+    interval-ms: ${SCORING_REFRESH_INTERVAL_MS:3600000}
+    initial-delay-ms: ${SCORING_REFRESH_INITIAL_DELAY_MS:300000}
+    window-days: ${SCORING_REFRESH_WINDOW_DAYS:14}
+    half-life-hours: ${SCORING_REFRESH_HALF_LIFE_HOURS:12.0}
+    top-limit: ${SCORING_REFRESH_TOP_LIMIT:500}
+
+# News Digest Generation Configuration
+digest:
+  job:
+    enabled: ${DIGEST_JOB_ENABLED:false}
+    cron: ${DIGEST_JOB_CRON:0 0 9 * * *}
+    window-hours: ${DIGEST_WINDOW_HOURS:24}
+    max-messages: ${DIGEST_MAX_MESSAGES:10}
+    language: ${DIGEST_LANGUAGE:en}
+    persona-mode: ${DIGEST_PERSONA_MODE:true}
+    check-interval-ms: ${DIGEST_CHECK_INTERVAL_MS:300000}
+  scheduler:
+    enabled: ${DIGEST_SCHEDULER_ENABLED:true}
+    check-window-minutes: ${DIGEST_SCHEDULER_WINDOW_MINUTES:5}
+
+# Background knowledge in reply prompts: top recent cluster-primary items from
+# the shared intelligence base, injected as a "things you happen to know"
+# section. Off by default; staging turns it on.
+prompt:
+  knowledge:
+    enabled: ${PROMPT_KNOWLEDGE_ENABLED:false}
+    window-hours: ${PROMPT_KNOWLEDGE_WINDOW_HOURS:24}
+    max-items: ${PROMPT_KNOWLEDGE_MAX_ITEMS:5}
+    max-item-chars: ${PROMPT_KNOWLEDGE_MAX_ITEM_CHARS:200}
+
+# Qdrant vector store (Track A — news embeddings). URL mapped from MEMO_QDRANT_URL env var
+# (same name used in docker-compose.staging.yml). OFF by default; staging turns the job on.
+qdrant:
+  url: ${MEMO_QDRANT_URL:http://localhost:6333}
+
+# Local TEI embeddings service (BAAI/bge-m3, 1024-dim, multilingual, no quota).
+# Served by the `embeddings` container in docker-compose.staging.yml.
+# In the headless smoke boot there is no embeddings service — fail-open is guaranteed
+# (any error → Mono.empty(); the job no-ops per row and retries on next tick).
+embedding:
+  url: ${EMBEDDING_URL:http://embeddings:80}
+  dim: 1024
+
+# News embedding job (Track A, Phase A1): generates text-embedding-3-small vectors for
+# news-eligible bot.messages rows and stores them in Qdrant.
+# OFF by default; staging turns it on via NEWS_EMBEDDING_ENABLED=true.
+news:
+  embedding:
+    enabled: ${NEWS_EMBEDDING_ENABLED:false}
+
+# Web-search enrichment (Tavily). OFF by default and a no-op without a key —
+# the knowledge block stays DB-only until both the flag and TAVILY_API_KEY are set.
+search:
+  tavily:
+    enabled: ${SEARCH_TAVILY_ENABLED:false}
+    api-key: ${TAVILY_API_KEY:}
+    max-results: ${SEARCH_TAVILY_MAX_RESULTS:3}
+    max-snippet-chars: ${SEARCH_TAVILY_MAX_SNIPPET_CHARS:200}
+
+# Proactive Engagement: one organic chat message per day per persona per chat
+proactive:
+  engagement:
+    enabled: true
+
+# Persona Reaction System Configuration
+persona:
+  reaction:
+    enabled: ${PERSONA_REACTION_ENABLED:false}
+    executor-interval-ms: 60000
+    daily-limit-per-persona: ${PERSONA_REACTION_DAILY_LIMIT_PER_PERSONA:15}
+    # Probability (0-100) a persona reacts to any single qualifying message.
+    # 100 = legacy (react to every qualifying message); lower = sparse, random-feeling.
+    react-probability-percent: ${PERSONA_REACTION_REACT_PROBABILITY_PERCENT:100}
+    delay-min-minutes: ${PERSONA_REACTION_DELAY_MIN_MINUTES:5}
+    delay-max-minutes: ${PERSONA_REACTION_DELAY_MAX_MINUTES:40}
+    min-gap-between-reactions-seconds: 30
+    min-gap-same-channel-minutes: ${PERSONA_REACTION_MIN_GAP_SAME_CHANNEL_MINUTES:30}
+    max-concurrent-executions: 5
+    flood-wait-backoff-minutes: 60
+    emoji-pool:
+      - emoji: "\uD83D\uDC4D"
+        weight: 60
+      - emoji: "\uD83D\uDD25"
+        weight: 30
+      - emoji: "\uD83D\uDCAF"
+        weight: 10
+
+# Admin API key guard (WebFilter on /api/admin/** and /api/python/**).
+# Leave blank (default) to disable the guard entirely — staging is unaffected.
+# Set ADMIN_API_KEY env-var on a secured deployment to require the
+# X-Admin-Key header on all admin/python endpoints.
+admin:
+  api:
+    key: ${ADMIN_API_KEY:}
+
+# Actuator Configuration (for monitoring)
+management:
+  endpoints:
+    web:
+      exposure:
+        include: ${MANAGEMENT_ENDPOINTS:health,info,metrics}
+  endpoint:
+    health:
+      # Changed from when-authorized to always to allow frontend monitoring panel to access health status
+      show-details: ${MANAGEMENT_HEALTH_DETAILS:always}

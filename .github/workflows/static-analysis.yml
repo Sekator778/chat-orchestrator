@@ -1,0 +1,60 @@
+name: Static Analysis
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Least-privilege token: read-only, we only upload a report artifact.
+permissions:
+  contents: read
+
+# Cancel superseded runs on the same ref to save runner minutes.
+concurrency:
+  group: static-analysis-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  static-analysis:
+    # REPORT-ONLY: this job never blocks merges.
+    # continue-on-error on the analysis step absorbs any non-zero exit from SpotBugs.
+    name: static-analysis (report-only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v7
+
+      - name: Set up JDK 21 (Temurin) with Maven cache
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+
+      - name: Compile (needed before SpotBugs can analyse bytecode)
+        run: mvn -B -ntp compile -DskipTests -Dtdlight.native.classifier=linux_amd64_gnu_ssl3
+
+      - name: SpotBugs — generate report (report-only, never fails the build)
+        # The `spotbugs` goal generates an XML/HTML report without setting a
+        # failure threshold, so it exits 0 even when findings exist.
+        # The `check` goal (which WOULD fail on findings) is intentionally NOT used.
+        # continue-on-error is an additional safety net in case of unexpected exits.
+        continue-on-error: true
+        run: |
+          mvn -B -ntp com.github.spotbugs:spotbugs-maven-plugin:4.8.6.6:spotbugs \
+            -DskipTests \
+            -Dtdlight.native.classifier=linux_amd64_gnu_ssl3 \
+            -Dspotbugs.xmlOutput=true \
+            -Dspotbugs.htmlOutput=true
+
+      - name: Upload SpotBugs report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: spotbugs-report
+          path: target/spotbugsXml.xml
+          if-no-files-found: warn

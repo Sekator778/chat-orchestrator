@@ -1,0 +1,108 @@
+# =============================================================================
+# Staging profile — persistent, prod-like dev stand (SPRING_PROFILES_ACTIVE=staging)
+# =============================================================================
+# Unlike the smoke profile (fully headless, telegram client OFF), staging runs
+# the REAL TDLight client against TEST Telegram accounts. Connection values
+# (DB / Kafka / Qdrant / Telegram creds / instance id) are injected as env vars
+# by docker/staging/docker-compose.staging.yml; everything else inherits
+# application.yml. Keep this file env-driven and secret-free.
+# =============================================================================
+
+# Real Telegram client ON (the bot actually logs in as the test account).
+telegram:
+  client:
+    enabled: true
+
+# Staging runs the test fixtures: enable the 'test-seed' Liquibase context so a
+# fresh stand seeds the test chat (055). The existing stand already applied it;
+# context is not in the checksum, so its data is untouched.
+spring:
+  liquibase:
+    contexts: ${LIQUIBASE_CONTEXTS:test-seed}
+
+# Admin HTTP surface on (actuator/health drives the container HEALTHCHECK).
+app:
+  http:
+    enabled: ${APP_HTTP_ENABLED:true}
+
+# Decision gate ON for staging: every inbound message goes through analyze →
+# decide before persona fan-out (fail-open; reply shaping stays off until it
+# proves itself). Flip off via env if the stand must mimic legacy behavior.
+bot:
+  decision-gate:
+    enabled: ${BOT_DECISION_GATE_ENABLED:true}
+    # Deflect-then-silence ON: first "ты бот" accusation is laughed off,
+    # a repeat within the strike window silences the chat for the cooldown.
+    cooldown-enabled: ${BOT_DECISION_GATE_COOLDOWN_ENABLED:true}
+  # Dispatch candidates come from bot.persona_chat_bindings (per-persona chat
+  # membership); chats without bindings fall back to the legacy channel array.
+  bindings:
+    enabled: ${BOT_BINDINGS_ENABLED:true}
+  # Each persona discovers its own chats on startup and records bindings
+  # (broadcast news channels excluded — those belong to the collector).
+  persona-discovery:
+    enabled: ${BOT_PERSONA_DISCOVERY_ENABLED:true}
+
+# Safety rails for a TEST stand: keep heavy auto-posting OFF by default so a
+# test account never spams real channels by accident. Flip any of these on via
+# env when you deliberately want to exercise that path on staging.
+proactive:
+  engagement:
+    enabled: ${PROACTIVE_ENGAGEMENT_ENABLED:false}
+digest:
+  job:
+    enabled: ${DIGEST_JOB_ENABLED:false}
+  scheduler:
+    enabled: ${DIGEST_SCHEDULER_ENABLED:false}
+
+# Intelligence loop ON for staging: cluster recent messages and keep scoring
+# fresh — internal DB computation only, nothing is posted anywhere. Digest
+# publishing above stays OFF (owner reviews posts before they go out).
+clustering:
+  job:
+    enabled: ${CLUSTERING_JOB_ENABLED:true}
+scoring:
+  refresh:
+    enabled: ${SCORING_REFRESH_ENABLED:true}
+
+# Unified ranking brain ON for staging: recompute bot.messages.importance every
+# hour using the floored multiplicative formula. Coefficients in bot.app_settings.
+ranking:
+  recompute:
+    enabled: ${RANKING_RECOMPUTE_ENABLED:true}
+
+# Web-as-collector ON for staging (Phase-1 T5 validation): harvest RSS feeds into
+# bot.messages as synthetic-channel news, scored by the ranking brain via outlet_trust.
+# Gated by BOTH this Spring property (bean creation) AND the app_settings
+# web-collector.enabled runtime flag. Short interval for first-light testing.
+web-collector:
+  enabled: ${WEB_COLLECTOR_ENABLED:true}
+  harvest-interval-ms: ${WEB_COLLECTOR_INTERVAL_MS:120000}
+
+# Background knowledge in reply prompts ON for staging: replies draw on the
+# shared intelligence base (pure DB read, no extra LLM calls, no posting).
+prompt:
+  knowledge:
+    enabled: ${PROMPT_KNOWLEDGE_ENABLED:true}
+
+# Local TEI embeddings service URL for staging — set EMBEDDING_URL in .env.staging or
+# use the default which resolves to the `embeddings` container on staging-net.
+embedding:
+  url: ${EMBEDDING_URL:http://embeddings:80}
+
+# News embedding job ON for staging (Track A, Phase A1): embeds news rows into Qdrant
+# using BAAI/bge-m3 (local TEI, 1024-dim, multilingual, no quota). Requires MEMO_QDRANT_URL
+# (set on staging) and the `embeddings` TEI service. Fail-open: if Qdrant or the TEI
+# service is unreachable the job no-ops per row and retries on the next tick. Master
+# runtime switch also lives in bot.app_settings (news.embedding.enabled), seeded as
+# false by cs078 — flip to true after deploy to start.
+news:
+  embedding:
+    enabled: ${NEWS_EMBEDDING_ENABLED:true}
+
+# Hacker News collector ON for staging (Track B3, normalization-contract template):
+# harvests top HN stories into bot.messages. Dual-gated: this Spring property (bean
+# creation) AND the app_settings hn-collector.enabled runtime flag (seeded false by
+# cs079 — flip via app_settings row to start harvesting without restart).
+hn-collector:
+  enabled: ${HN_COLLECTOR_ENABLED:true}

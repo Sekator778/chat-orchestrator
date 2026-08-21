@@ -1,0 +1,95 @@
+target/
+!.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+### IntelliJ IDEA ###
+.idea/modules.xml
+.idea/jarRepositories.xml
+.idea/compiler.xml
+.idea/libraries/
+*.iws
+*.iml
+*.ipr
+
+### Eclipse ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+
+### NetBeans ###
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+build/
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+### VS Code ###
+.vscode/
+
+### Mac OS ###
+.DS_Store
+/media/
+/media-dev/
+/test-media/
+/logs/
+/.env.template
+/tdlib_db/
+/tdlib_files/
+/tdlib-files/
+/tdlib-sessions/
+/Telegram_scaner/logs/
+/.idea/
+/.mcp.json
+
+### Claude Code ###
+.claude/settings.local.json
+.claude/.cache/
+.claude/sessions/
+
+### Test Output Logs ###
+logs/
+*.log
+target/surefire-reports/
+target/failsafe-reports/
+.aider*
+/telegrams_channels_dump/
+
+### Secrets - NEVER commit; use the *.example templates instead ###
+**/application-dev.yml
+**/application-chia.yml
+**/application-local.yml
+**/application-prod.yml
+**/*.session
+**/.env
+**/.env.staging
+**/.env.atlas
+**/.env.atlas.staging
+!**/.env.example
+!**/.env.staging.example
+!**/.env.atlas.example
+Telegram_scaner/data/
+chia_ssh.txt
+**/*.pem
+**/*.p12
+
+### Local working directories ###
+/temp/
+/.tmp/
+/.pids/
+/tdlib-db/
+
+### Phase 0 code index - generated, never commit ###
+tools/code-index/qdrant_storage/
+tools/code-index/fastembed_cache/
+### CodeGraph local index - generated per-developer, never commit ###
+.codegraph/
+node_modules/
+.env

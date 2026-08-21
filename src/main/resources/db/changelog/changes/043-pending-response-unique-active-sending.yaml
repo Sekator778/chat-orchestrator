@@ -1,0 +1,30 @@
+databaseChangeLog:
+  - changeSet:
+      id: 043-pending-response-unique-active-sending
+      author: codex
+      comment: "Prevent duplicates while a pending response is being sent (include SENDING in unique index predicate)"
+      preConditions:
+        - onFail: MARK_RAN
+        - tableExists:
+            schemaName: bot
+            tableName: pending_responses
+      changes:
+        - sql:
+            dbms: postgresql
+            splitStatements: false
+            stripComments: true
+            sql: |
+              DROP INDEX IF EXISTS bot.uq_pending_responses_active_trigger;
+              CREATE UNIQUE INDEX IF NOT EXISTS uq_pending_responses_active_trigger
+              ON bot.pending_responses (bot_instance_id, chat_id, triggering_message_id)
+              WHERE status IN ('PENDING', 'ELIGIBLE', 'SENDING');
+      rollback:
+        - sql:
+            dbms: postgresql
+            splitStatements: false
+            stripComments: true
+            sql: |
+              DROP INDEX IF EXISTS bot.uq_pending_responses_active_trigger;
+              CREATE UNIQUE INDEX IF NOT EXISTS uq_pending_responses_active_trigger
+              ON bot.pending_responses (bot_instance_id, chat_id, triggering_message_id)
+              WHERE status IN ('PENDING', 'ELIGIBLE');
