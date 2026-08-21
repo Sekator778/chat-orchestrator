@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Example LaunchAgent: poll CI every 5 minutes and deliver the newest green main
+  build to this stand. This is the macOS counterpart of the WSL stand's
+  ops/systemd/staging-deliver.timer - same job, same cadence, different init.
+
+  Optional: scripts/atlas-deliver.sh is idempotent and safe to run by hand, and
+  running it by hand is the better default until the stand has proven itself.
+
+  Install (replace the two placeholders first):
+    sed -e "s|__REPO_DIR__|$PWD|g" -e "s|__HOME__|$HOME|g" \
+      docker/atlas/com.example.orch-deliver.plist.example \
+      > ~/Library/LaunchAgents/com.example.orch-deliver.plist
+    plutil -lint ~/Library/LaunchAgents/com.example.orch-deliver.plist
+    mkdir -p ~/.orch-deploy
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.example.orch-deliver.plist
+
+  Run once on demand / inspect / remove:
+    launchctl kickstart -p gui/$(id -u)/com.example.orch-deliver
+    launchctl print gui/$(id -u)/com.example.orch-deliver
+    launchctl bootout gui/$(id -u)/com.example.orch-deliver
+
+  It is a LaunchAgent, not a LaunchDaemon, on purpose: it needs the logged-in
+  user's Docker socket, gh credentials and JDK, none of which a root daemon has.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.example.orch-deliver</string>
+
+    <!-- A login shell picks up the user's PATH (Homebrew gh, sdkman JDK, docker
+         from OrbStack); EnvironmentVariables below is the fallback for the case
+         where the shell profile does not run under launchd. -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>-lc</string>
+        <string>exec __REPO_DIR__/scripts/atlas-deliver.sh</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>__REPO_DIR__</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    </dict>
+
+    <!-- Every 5 minutes. A poll that finds nothing new exits in about a second:
+         it is one `gh run list` call and a string compare. -->
+    <key>StartInterval</key>
+    <integer>300</integer>
+
+    <!-- Deliberately false: a deploy on login would restart the app while the
+         stand is still coming up. The first poll follows within 5 minutes. -->
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>__HOME__/.orch-deploy/deliver.log</string>
+    <key>StandardErrorPath</key>
+    <string>__HOME__/.orch-deploy/deliver.log</string>
+</dict>
+</plist>

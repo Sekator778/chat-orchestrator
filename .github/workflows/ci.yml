@@ -21,7 +21,15 @@ jobs:
   build:
     name: Build & Test
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Two Maven builds run here on main/dispatch: the linux `verify` gate and the
+    # macOS/arm64 deploy jar. 15 minutes only covered the first one.
+    timeout-minutes: 25
+
+    env:
+      # The deployable jar is published after a green verify on the mainline
+      # (post-merge) and on a manual dispatch used to smoke-test this workflow.
+      # Pull requests build and test only - they publish nothing.
+      PUBLISH_DEPLOY_JAR: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
 
     steps:
       - name: Checkout source
@@ -40,3 +48,45 @@ jobs:
         # and Kafka; they are already excluded by maven-surefire-plugin in pom.xml and do
         # NOT run in this workflow. Override the TDLight native classifier for the Linux runner.
         run: mvn -B -ntp verify -Dtdlight.native.classifier=linux_amd64_gnu_ssl3
+
+      # --- deployable artifact for the atlas stand (macOS / Apple Silicon) ------
+      # The TDLight natives are baked into the fat jar at build time, picked by
+      # `tdlight.native.classifier`. The jar tested above therefore carries the
+      # linux natives and can NOT run natively on the Mac. The deploy jar is a
+      # separate build with the macOS classifier; the natives are an ordinary
+      # Maven artifact, so cross-building them on ubuntu is fine.
+      - name: Build deployable jar (macOS/arm64 natives)
+        if: env.PUBLISH_DEPLOY_JAR == 'true'
+        # `clean` is mandatory, not hygiene: maven-jar-plugin skips a jar that is
+        # newer than target/classes, and spring-boot:repackage leaves an already
+        # repackaged jar alone - without it the linux jar from `verify` would be
+        # published unchanged under the macOS artifact name.
+        run: mvn -B -ntp clean package -DskipTests -Dtdlight.native.classifier=macos_arm64
+
+      - name: Assert the deploy jar carries the macOS/arm64 natives
+        if: env.PUBLISH_DEPLOY_JAR == 'true'
+        run: |
+          jar=target/telegram-userbot-1.0.0.jar
+          test -f "$jar" || { echo "::error::$jar was not produced"; exit 1; }
+          if ! unzip -l "$jar" | grep -q 'tdlight-natives-.*-macos_arm64\.jar'; then
+            echo "::error::macos_arm64 natives are missing from $jar - it would not boot on the Mac"
+            exit 1
+          fi
+          if unzip -l "$jar" | grep -q 'tdlight-natives-.*-linux_'; then
+            echo "::error::linux natives leaked into the macOS deploy jar"
+            exit 1
+          fi
+          echo "ok: $(unzip -l "$jar" | grep -o 'tdlight-natives-[^ ]*\.jar' | head -1)"
+
+      - name: Upload deployable jar
+        if: env.PUBLISH_DEPLOY_JAR == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          # scripts/atlas-deliver.sh resolves the artifact of the latest successful
+          # run on main; the SHA in the name is what the stand records as deployed.
+          name: app-jar-${{ github.sha }}
+          path: target/telegram-userbot-1.0.0.jar
+          if-no-files-found: error
+          # The stand only ever pulls the newest successful main run; a month of
+          # history is plenty and keeps the artifact storage bounded.
+          retention-days: 30
