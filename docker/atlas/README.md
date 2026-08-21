@@ -6,7 +6,7 @@ runs **natively** as a plain JVM against it — there is no app container here.
 | Piece | Where | Note |
 |---|---|---|
 | Postgres 16 | `tg-orch-postgres`, `127.0.0.1:5433` | db `news_aggregator_db`, user/password `staging` — the staging names, so the winbox `pg_dump` restores without renames |
-| Redpanda (Kafka wire) | `tg-orch-redpanda`, `127.0.0.1:9094` | single node, `--mode dev-container`, advertises `localhost:9094` for the host JVM |
+| Redpanda (Kafka wire) | `tg-orch-redpanda`, `127.0.0.1:9094` | single node, `--mode dev-container`, advertises `localhost:9094` for the host JVM, `--smp 1` (one Seastar reactor thread — keeps idle CPU low on a shared dev machine) |
 | Qdrant | `tg-orch-qdrant`, `127.0.0.1:6335` | |
 | Embeddings (TEI, `BAAI/bge-m3`) | `127.0.0.1:8087` | **not in this stack** — already running natively on this machine, shared with the other local stands |
 | App | host JVM, `127.0.0.1:8099` | JDK 21, TDLight classifier `macos_arm64` |
