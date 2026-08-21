@@ -84,7 +84,7 @@
         <dependency>
             <groupId>org.springdoc</groupId>
             <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
-            <version>2.5.0</version> <!-- Pinned: springdoc 3.x needs Spring Boot 3.5+; project is on 3.3.4 (3.0.3 broke boot: ApplicationServletEnvironment NoClassDefFoundError). Do NOT bump past 2.x until Spring Boot is upgraded. -->
+            <version>3.1.0</version> <!-- Pinned: springdoc 3.x needs Spring Boot 3.5+; project is on 3.3.4 (3.0.3 broke boot: ApplicationServletEnvironment NoClassDefFoundError). Do NOT bump past 2.x until Spring Boot is upgraded. -->
         </dependency>
         <!-- Spring Boot Starters -->
         <dependency>
