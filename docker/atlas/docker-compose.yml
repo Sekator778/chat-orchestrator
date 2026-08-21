@@ -65,6 +65,11 @@ services:
       - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:9094
       - --advertise-kafka-addr internal://redpanda:9092,external://localhost:9094
       - --mode dev-container
+      # Without --smp Seastar starts one busy-poll/housekeeping reactor thread per
+      # visible host core - 15 on this machine - and the idle container burns
+      # ~30-60% of the host CPU. Capping it to a single reactor is plenty: the
+      # stand serves one topic with one partition, far below one core's worth.
+      - --smp 1
       - --default-log-level warn
     volumes:
       - redpanda_data:/var/lib/redpanda/data
