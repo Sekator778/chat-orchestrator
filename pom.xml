@@ -47,7 +47,7 @@
                 <groupId>it.tdlight</groupId>
                 <artifactId>tdlight-java-bom</artifactId>
                 <!-- Перевірте наявність новішої версії BOM, якщо потрібно -->
-                <version>3.4.0+td.1.8.26</version>
+                <version>3.5.5+td.1.8.66</version>
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
@@ -114,7 +114,7 @@
         <dependency>
             <groupId>com.google.guava</groupId>
             <artifactId>guava</artifactId>
-            <version>33.2.1-jre</version> <!-- Используйте последнюю стабильную версию -->
+            <version>33.7.1-jre</version> <!-- Используйте последнюю стабильную версию -->
         </dependency>
         <!-- Database -->
         <dependency>
@@ -146,14 +146,14 @@
         <dependency>
             <groupId>com.google.zxing</groupId>
             <artifactId>core</artifactId>
-            <version>3.5.3</version>
+            <version>3.5.4</version>
         </dependency>
 
         <!-- macOS: ARM на M1/M2 — osx-aarch_64, Intel — osx-x86_64; Windows AMD/Intel — отдельного native DNS резолвера нет, используйте системный (эту зависимость можно не подключать) -->
         <dependency>
             <groupId>io.netty</groupId>
             <artifactId>netty-resolver-dns-native-macos</artifactId>
-            <version>4.1.113.Final</version>
+            <version>4.2.17.Final</version>
             <classifier>osx-aarch_64</classifier>
             <scope>runtime</scope>
         </dependency>
@@ -201,7 +201,7 @@
         <dependency>
             <groupId>org.awaitility</groupId>
             <artifactId>awaitility</artifactId>
-            <version>4.2.1</version> <!-- Або новіша -->
+            <version>4.3.0</version> <!-- Або новіша -->
             <scope>test</scope>
         </dependency>
 
@@ -273,7 +273,7 @@
                     <plugin>
                         <groupId>com.github.eirslett</groupId>
                         <artifactId>frontend-maven-plugin</artifactId>
-                        <version>2.0.1</version>
+                        <version>2.0.2</version>
                         <configuration>
                             <workingDirectory>frontend</workingDirectory>
                         </configuration>
