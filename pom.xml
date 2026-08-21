@@ -193,7 +193,7 @@
             <groupId>com.squareup.okhttp3</groupId>
             <artifactId>mockwebserver</artifactId>
             <!-- Перевірте сумісну версію, можливо, потрібна новіша -->
-            <version>4.12.0</version>
+            <version>5.5.0</version>
             <scope>test</scope>
         </dependency>
 
