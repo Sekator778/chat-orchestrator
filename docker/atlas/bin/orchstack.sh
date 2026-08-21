@@ -9,10 +9,16 @@
 #   orchstack.sh logs [service]   follow container logs
 #   orchstack.sh sql              open psql as the application user
 #   orchstack.sh app start [--build]   build if needed, then run the jar natively
+#   orchstack.sh app start --jar PATH  run a jar that was built elsewhere (CI)
 #   orchstack.sh app stop|status|restart
 #
 # The app is NOT a container here: it runs as a plain JVM on the Mac against the
 # infra this script starts. Its environment comes from docker/atlas/.env.atlas.
+#
+# The jar defaults to target/telegram-userbot-1.0.0.jar and is built on demand.
+# `--jar PATH` (or APP_JAR=PATH in the environment) points the run at a prebuilt
+# jar instead - that is how scripts/atlas-deliver.sh runs the CI artifact. With an
+# explicit jar nothing is ever built: a missing file is an error, not a rebuild.
 set -euo pipefail
 
 STACK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -34,11 +40,18 @@ SETTINGS_REL="docker/atlas/settings-atlas.xml"
 # is published and carries libtdjni.macos_arm64.dylib, so the jar runs natively -
 # no Rosetta and no linux_amd64_gnu_ssl3-in-a-container fallback needed.
 TD_CLASSIFIER="macos_arm64"
-APP_JAR="$PROJECT_ROOT/target/telegram-userbot-1.0.0.jar"
+DEFAULT_APP_JAR="$PROJECT_ROOT/target/telegram-userbot-1.0.0.jar"
+# An APP_JAR inherited from the environment marks the jar as externally supplied,
+# exactly like --jar does: build-if-missing is off for it.
+APP_JAR="${APP_JAR:-$DEFAULT_APP_JAR}"
+if [ "$APP_JAR" = "$DEFAULT_APP_JAR" ]; then APP_JAR_EXTERNAL=false; else APP_JAR_EXTERNAL=true; fi
 APP_PORT=8099
 APP_LOG="$PROJECT_ROOT/logs/app.log"
 BUILD_LOG="$PROJECT_ROOT/logs/build.log"
 APP_PID_FILE="$PROJECT_ROOT/.pids/app.pid"
+# The jar the running app was started from. Without it a plain `app status` (no
+# APP_JAR in the environment) would not recognise a run started from a CI jar.
+APP_JAR_FILE="$PROJECT_ROOT/.pids/app.jar"
 JAVA_REQUIRED=21
 
 log()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
@@ -195,19 +208,28 @@ build_app() {
 }
 
 app_pid() {
-  local pid
+  local pid running_jar
   [ -f "$APP_PID_FILE" ] || return 1
   pid="$(cat "$APP_PID_FILE" 2>/dev/null || true)"
   [ -n "$pid" ] || return 1
+  running_jar="$(cat "$APP_JAR_FILE" 2>/dev/null || true)"
+  [ -n "$running_jar" ] || running_jar="$APP_JAR"
   # A recycled PID number from a stale pidfile must not be reported as ours, and
   # must never be killed by app_stop.
-  ps -p "$pid" -o command= 2>/dev/null | grep -q -- "$(basename "$APP_JAR")" || return 1
+  ps -p "$pid" -o command= 2>/dev/null | grep -q -- "$(basename "$running_jar")" || return 1
   echo "$pid"
 }
 
 app_start() {
   local force_build=false
-  [ "${1:-}" = "--build" ] && force_build=true
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --build) force_build=true; shift ;;
+      --jar)   [ -n "${2:-}" ] || { warn "--jar needs a path"; return 1; }
+               APP_JAR="$2"; APP_JAR_EXTERNAL=true; shift 2 ;;
+      *)       warn "unknown option: $1"; return 1 ;;
+    esac
+  done
 
   if app_pid >/dev/null; then
     log "the app is already running (PID $(app_pid)) - http://localhost:$APP_PORT/actuator/health"
@@ -222,7 +244,14 @@ app_start() {
     return 1
   fi
 
-  if [ "$force_build" = true ] || [ ! -f "$APP_JAR" ]; then
+  if [ "$APP_JAR_EXTERNAL" = true ]; then
+    # A jar built elsewhere (CI) is never regenerated here: rebuilding would write
+    # to target/ and leave this path untouched, so the run would silently use a
+    # different jar than the one that was asked for.
+    [ -f "$APP_JAR" ] || { warn "$APP_JAR does not exist - nothing to run"; return 1; }
+    if [ "$force_build" = true ]; then warn "--build ignored: an explicit jar was given"; fi
+    log "using the supplied jar: $APP_JAR"
+  elif [ "$force_build" = true ] || [ ! -f "$APP_JAR" ]; then
     build_app || return 1
   else
     log "using the existing jar (pass --build to rebuild)"
@@ -247,6 +276,7 @@ app_start() {
     exec </dev/null >"$APP_LOG" 2>&1
     nohup "$JAVA_HOME/bin/java" -jar "$APP_JAR" &
     echo $! >"$APP_PID_FILE"
+    echo "$APP_JAR" >"$APP_JAR_FILE"
   )
 
   for _ in $(seq 90); do
@@ -265,26 +295,26 @@ app_stop() {
   local pid
   if ! pid="$(app_pid)"; then
     log "the app is not running"
-    rm -f "$APP_PID_FILE"
+    rm -f "$APP_PID_FILE" "$APP_JAR_FILE"
     return 0
   fi
   log "stopping the app (PID $pid)"
   kill "$pid" 2>/dev/null || true
   for _ in $(seq 15); do
-    ps -p "$pid" >/dev/null 2>&1 || { rm -f "$APP_PID_FILE"; log "the app stopped"; return 0; }
+    ps -p "$pid" >/dev/null 2>&1 || { rm -f "$APP_PID_FILE" "$APP_JAR_FILE"; log "the app stopped"; return 0; }
     sleep 1
   done
   warn "the app ignored SIGTERM - sending SIGKILL"
   kill -9 "$pid" 2>/dev/null || true
   sleep 1
-  rm -f "$APP_PID_FILE"
+  rm -f "$APP_PID_FILE" "$APP_JAR_FILE"
 }
 
 app_status() {
   local pid health
   if pid="$(app_pid)"; then
     health="$(curl -fsS -m 3 "http://localhost:$APP_PORT/actuator/health" 2>/dev/null || echo 'no answer')"
-    log "app: RUNNING (PID $pid) - $health"
+    log "app: RUNNING (PID $pid, jar $(cat "$APP_JAR_FILE" 2>/dev/null || echo "$APP_JAR")) - $health"
   else
     log "app: STOPPED"
   fi
@@ -296,7 +326,7 @@ cmd_app() {
     stop)    app_stop ;;
     status)  app_status ;;
     restart) shift; app_stop; sleep 2; app_start ${1+"$@"} ;;
-    *)       warn "usage: orchstack.sh app [start [--build]|stop|status|restart]"; return 1 ;;
+    *)       warn "usage: orchstack.sh app [start [--build|--jar PATH]|stop|status|restart]"; return 1 ;;
   esac
 }
 
