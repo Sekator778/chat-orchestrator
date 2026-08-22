@@ -30,8 +30,8 @@ rules below are the convention.
   returns to it.
 - **Promotion.** `dev` reaches `main` through a maintainer-opened `dev` → `main`
   pull request, merged (not squashed) so both histories stay comparable. That
-  merge is the deploy trigger: CI publishes the jar and the atlas stand picks it
-  up on its next poll. Nothing is committed to `main` directly except a hotfix,
+  merge is what produces a deployable jar: CI publishes it, and the stand takes it
+  the next time the app is started there. Nothing is committed to `main` directly except a hotfix,
   which is merged back into `dev` the same day.
 
 ## The shared-clone rule (important — this is where confusion happens)
