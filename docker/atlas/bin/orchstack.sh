@@ -8,17 +8,30 @@
 #   orchstack.sh status           containers, app, health and memory
 #   orchstack.sh logs [service]   follow container logs
 #   orchstack.sh sql              open psql as the application user
-#   orchstack.sh app start [--build]   build if needed, then run the jar natively
-#   orchstack.sh app start --jar PATH  run a jar that was built elsewhere (CI)
+#   orchstack.sh app start             update from main if there is anything
+#                                      newer, then run it
+#   orchstack.sh app start --no-update run the jar already here, as is
+#   orchstack.sh app start --build     build this working copy and run that
+#   orchstack.sh app start --jar PATH  run a specific jar
 #   orchstack.sh app stop|status|restart
 #
 # The app is NOT a container here: it runs as a plain JVM on the Mac against the
 # infra this script starts. Its environment comes from docker/atlas/.env.atlas.
 #
-# The jar defaults to target/telegram-userbot-1.0.0.jar and is built on demand.
-# `--jar PATH` (or APP_JAR=PATH in the environment) points the run at a prebuilt
-# jar instead - that is how scripts/orch-deploy.sh runs the CI artifact. With an
-# explicit jar nothing is ever built: a missing file is an error, not a rebuild.
+# Starting the app is also how the stand updates itself. `app start` asks GitHub
+# whether main has a build newer than the one deployed here; if it does, the jar
+# is downloaded and started, and if it does not - or there is no network, no gh,
+# nothing to download - the jar already in ~/.orch-deploy starts instead. Nothing
+# runs in the background: no timer, no agent, no polling. The stand is current as
+# of the moment you started it.
+#
+# CI builds that jar once per commit on main (see .github/workflows/ci.yml); it
+# carries the macOS/arm64 TDLight natives, which a linux-classifier jar does not,
+# so the artifact from a main build is the only one that runs natively here.
+#
+#   ~/.orch-deploy/current.jar    what the app runs
+#   ~/.orch-deploy/previous.jar   the one before it - the rollback target
+#   ~/.orch-deploy/state          SHA of the build that last came up healthy
 set -euo pipefail
 
 STACK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -40,11 +53,24 @@ SETTINGS_REL="docker/atlas/settings-atlas.xml"
 # is published and carries libtdjni.macos_arm64.dylib, so the jar runs natively -
 # no Rosetta and no linux_amd64_gnu_ssl3-in-a-container fallback needed.
 TD_CLASSIFIER="macos_arm64"
-DEFAULT_APP_JAR="$PROJECT_ROOT/target/telegram-userbot-1.0.0.jar"
-# An APP_JAR inherited from the environment marks the jar as externally supplied,
-# exactly like --jar does: build-if-missing is off for it.
-APP_JAR="${APP_JAR:-$DEFAULT_APP_JAR}"
-if [ "$APP_JAR" = "$DEFAULT_APP_JAR" ]; then APP_JAR_EXTERNAL=false; else APP_JAR_EXTERNAL=true; fi
+BUILT_APP_JAR="$PROJECT_ROOT/target/telegram-userbot-1.0.0.jar"
+
+# What the stand runs, kept outside the repo so a `git clean` cannot wipe a
+# running deployment.
+DEPLOY_DIR="${ORCH_DEPLOY_DIR:-$HOME/.orch-deploy}"
+CURRENT_JAR="$DEPLOY_DIR/current.jar"
+PREVIOUS_JAR="$DEPLOY_DIR/previous.jar"
+STATE_FILE="$DEPLOY_DIR/state"
+
+# Where the update comes from. ORCH_REPO overrides the repository the git remote
+# points at; ORCH_BRANCH the branch whose builds are deployable.
+ORCH_REPO="${ORCH_REPO:-}"
+ORCH_BRANCH="${ORCH_BRANCH:-main}"
+# How far back to look for a build that actually published a jar. Only matters
+# for old commits: green runs from before the deploy job existed have none.
+ORCH_SCAN_RUNS="${ORCH_SCAN_RUNS:-10}"
+
+APP_JAR="$CURRENT_JAR"
 APP_PORT=8099
 APP_LOG="$PROJECT_ROOT/logs/app.log"
 BUILD_LOG="$PROJECT_ROOT/logs/build.log"
@@ -207,6 +233,89 @@ build_app() {
   log "build finished"
 }
 
+# Ask GitHub whether main carries a build newer than the one deployed here and,
+# if so, put it in place as current.jar. Best effort by design: no gh, no network,
+# no artifact - the stand still starts on the jar it already has. UPDATED_SHA is
+# left non-empty only when a new jar was installed, so app_start knows to record
+# it once the app answers, and to roll back if it does not.
+UPDATED_SHA=""
+
+resolve_repo() {
+  [ -n "$ORCH_REPO" ] && return 0
+  ORCH_REPO="$(cd "$PROJECT_ROOT" && gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null || true)"
+  [ -n "$ORCH_REPO" ]
+}
+
+# A green run is not automatically a deployable one: runs from before the deploy
+# job existed, and runs whose artifact has aged out of retention, publish nothing.
+run_has_jar() {
+  gh api "repos/$ORCH_REPO/actions/runs/$1/artifacts" \
+     --jq '[.artifacts[] | select(.expired == false) | select(.name | startswith("app-jar-"))] | length' \
+     2>/dev/null | grep -qx '[1-9][0-9]*'
+}
+
+update_from_main() {
+  local deployed runs candidate_id candidate_sha run_id sha tmp new_jar
+
+  command -v gh >/dev/null 2>&1 || { warn "gh is not installed - starting the jar already here"; return 0; }
+  gh auth status >/dev/null 2>&1 || { warn "gh is not authenticated ('gh auth login') - starting the jar already here"; return 0; }
+  resolve_repo || { warn "cannot tell which GitHub repository to use - starting the jar already here"; return 0; }
+
+  mkdir -p "$DEPLOY_DIR"
+  deployed="$(cat "$STATE_FILE" 2>/dev/null || true)"
+
+  log "checking $ORCH_BRANCH for a newer build"
+  runs="$(gh run list -R "$ORCH_REPO" --workflow ci.yml --branch "$ORCH_BRANCH" \
+            --status success --limit "$ORCH_SCAN_RUNS" \
+            --json databaseId,headSha --jq '.[] | "\(.databaseId) \(.headSha)"' 2>/dev/null || true)"
+  if [ -z "$runs" ]; then
+    warn "GitHub gave no successful $ORCH_BRANCH build (offline?) - starting the jar already here"
+    return 0
+  fi
+
+  run_id=""; sha=""
+  # Newest first. Reaching the deployed SHA means everything newer published no
+  # jar, so there is nothing to update to.
+  while read -r candidate_id candidate_sha; do
+    [ -n "$candidate_id" ] || continue
+    if [ "$candidate_sha" = "$deployed" ]; then
+      log "already on the newest $ORCH_BRANCH build ($(short_sha "$deployed"))"
+      return 0
+    fi
+    if run_has_jar "$candidate_id"; then run_id="$candidate_id"; sha="$candidate_sha"; break; fi
+  done <<EOF
+$runs
+EOF
+
+  if [ -z "$run_id" ]; then
+    warn "no $ORCH_BRANCH build in the last $ORCH_SCAN_RUNS published a jar - starting the jar already here"
+    return 0
+  fi
+
+  log "new build on $ORCH_BRANCH: $(short_sha "$sha") (run $run_id) - downloading"
+  tmp="$(mktemp -d "$DEPLOY_DIR/download.XXXXXX")"
+  if ! gh run download "$run_id" -R "$ORCH_REPO" -n "app-jar-$sha" -D "$tmp" >/dev/null 2>&1; then
+    rm -rf "$tmp"
+    warn "could not download the artifact of run $run_id - starting the jar already here"
+    return 0
+  fi
+  new_jar="$(find "$tmp" -type f -name '*.jar' | head -1)"
+  # The natives are baked in at build time: a linux-classifier jar cannot start
+  # natively on this Mac, so refuse it here rather than at the health wait.
+  if [ -z "$new_jar" ] ||
+     ! unzip -l "$new_jar" 2>/dev/null | grep -q 'tdlight-natives-.*-macos_arm64\.jar'; then
+    rm -rf "$tmp"
+    warn "that build has no usable macOS jar - starting the jar already here"
+    return 0
+  fi
+
+  [ -f "$CURRENT_JAR" ] && mv -f "$CURRENT_JAR" "$PREVIOUS_JAR"
+  mv -f "$new_jar" "$CURRENT_JAR"
+  rm -rf "$tmp"
+  UPDATED_SHA="$sha"
+  log "installed the new jar - the running one is kept as previous.jar"
+}
+
 app_pid() {
   local pid running_jar
   [ -f "$APP_PID_FILE" ] || return 1
@@ -220,14 +329,64 @@ app_pid() {
   echo "$pid"
 }
 
+short_sha() { echo "$1" | cut -c1-12; }
+
+# Forks the JVM and returns; the caller decides how long to wait for it.
+launch_app() {
+  mkdir -p "$PROJECT_ROOT/logs" "$PROJECT_ROOT/.pids"
+  # One-generation rotation: the current run and the one before it, nothing else.
+  if [ -f "$APP_LOG" ]; then mv -f "$APP_LOG" "$APP_LOG.prev"; fi
+  log "starting the app from $APP_JAR"
+  # `exec` re-points the subshell's own descriptors before the JVM is forked, so
+  # neither it nor anything it spawns is left holding this script's stdout - a
+  # piped `orchstack.sh app start | tee` would otherwise never see end of input.
+  (
+    cd "$PROJECT_ROOT" || exit 1
+    set -a
+    # shellcheck disable=SC1090
+    . "$ENV_FILE"
+    set +a
+    exec </dev/null >"$APP_LOG" 2>&1
+    nohup "$JAVA_HOME/bin/java" -jar "$APP_JAR" &
+    echo $! >"$APP_PID_FILE"
+    echo "$APP_JAR" >"$APP_JAR_FILE"
+  )
+}
+
+# Our process first, the port second. A health check that trusts the port alone
+# passes on a stale JVM from an earlier run that is still bound to it, and then a
+# deploy records a SHA that is not what is actually serving.
+wait_for_health() {
+  local tries="${1:-90}"
+  for _ in $(seq "$tries"); do
+    app_pid >/dev/null || { warn "the app exited during startup - see logs/app.log"; return 1; }
+    if curl -fsS -o /dev/null -m 2 "http://localhost:$APP_PORT/actuator/health" 2>/dev/null; then
+      return 0
+    fi
+    sleep 2
+  done
+  warn "the app did not answer on $APP_PORT in time - see logs/app.log"
+  return 1
+}
+
+# Something on the port that is not ours means an earlier run outlived its
+# pidfile. Starting a second JVM on top of it would fail to bind and then look
+# healthy, because the old one answers.
+port_taken_by_stranger() {
+  app_pid >/dev/null && return 1
+  curl -fsS -o /dev/null -m 2 "http://localhost:$APP_PORT/actuator/health" 2>/dev/null
+}
+
 app_start() {
-  local force_build=false
+  local mode=update
+
   while [ $# -gt 0 ]; do
     case "$1" in
-      --build) force_build=true; shift ;;
-      --jar)   [ -n "${2:-}" ] || { warn "--jar needs a path"; return 1; }
-               APP_JAR="$2"; APP_JAR_EXTERNAL=true; shift 2 ;;
-      *)       warn "unknown option: $1"; return 1 ;;
+      --no-update) mode=asis;  shift ;;
+      --build)     mode=build; shift ;;
+      --jar)       [ -n "${2:-}" ] || { warn "--jar needs a path"; return 1; }
+                   mode=jar; APP_JAR="$2"; shift 2 ;;
+      *)           warn "usage: orchstack.sh app start [--no-update|--build|--jar PATH]"; return 1 ;;
     esac
   done
 
@@ -243,51 +402,66 @@ app_start() {
     warn "$PG_CONTAINER is not running - run 'orchstack.sh up' first"
     return 1
   fi
-
-  if [ "$APP_JAR_EXTERNAL" = true ]; then
-    # A jar built elsewhere (CI) is never regenerated here: rebuilding would write
-    # to target/ and leave this path untouched, so the run would silently use a
-    # different jar than the one that was asked for.
-    [ -f "$APP_JAR" ] || { warn "$APP_JAR does not exist - nothing to run"; return 1; }
-    if [ "$force_build" = true ]; then warn "--build ignored: an explicit jar was given"; fi
-    log "using the supplied jar: $APP_JAR"
-  elif [ "$force_build" = true ] || [ ! -f "$APP_JAR" ]; then
-    build_app || return 1
-  else
-    log "using the existing jar (pass --build to rebuild)"
+  if port_taken_by_stranger; then
+    warn "something is already answering on port $APP_PORT and it is not ours"
+    warn "an app from an earlier run outlived its pidfile - kill it, then start again:"
+    warn "  lsof -ti tcp:$APP_PORT | xargs kill"
+    return 1
   fi
+
+  case "$mode" in
+    update)
+      # The whole update story: one check, right here, before the app starts.
+      update_from_main
+      if [ ! -f "$APP_JAR" ]; then
+        warn "$APP_JAR does not exist and nothing could be downloaded"
+        warn "build this working copy instead: orchstack.sh app start --build"
+        return 1
+      fi ;;
+    asis)
+      [ -f "$APP_JAR" ] || { warn "$APP_JAR does not exist - drop --no-update to fetch it"; return 1; }
+      log "not checking $ORCH_BRANCH - using the jar already here" ;;
+    build)
+      build_app || return 1
+      APP_JAR="$BUILT_APP_JAR" ;;
+    jar)
+      [ -f "$APP_JAR" ] || { warn "$APP_JAR does not exist - nothing to run"; return 1; } ;;
+  esac
+
   resolve_java || return 1
+  launch_app
 
-  mkdir -p "$PROJECT_ROOT/logs" "$PROJECT_ROOT/.pids"
-  # One-generation rotation: the current
-  # run and the one before it, nothing else.
-  if [ -f "$APP_LOG" ]; then mv -f "$APP_LOG" "$APP_LOG.prev"; fi
-
-  log "starting the app"
-  # `exec` re-points the subshell's own descriptors before the JVM is forked, so
-  # neither it nor anything it spawns is left holding this script's stdout - a
-  # piped `orchstack.sh app start | tee` would otherwise never see end of input.
-  (
-    cd "$PROJECT_ROOT" || exit 1
-    set -a
-    # shellcheck disable=SC1090
-    . "$ENV_FILE"
-    set +a
-    exec </dev/null >"$APP_LOG" 2>&1
-    nohup "$JAVA_HOME/bin/java" -jar "$APP_JAR" &
-    echo $! >"$APP_PID_FILE"
-    echo "$APP_JAR" >"$APP_JAR_FILE"
-  )
-
-  for _ in $(seq 90); do
-    if curl -fsS -o /dev/null -m 2 "http://localhost:$APP_PORT/actuator/health" 2>/dev/null; then
-      log "the app is up - http://localhost:$APP_PORT/actuator/health"
-      return 0
+  if wait_for_health 90; then
+    log "the app is up - http://localhost:$APP_PORT/actuator/health"
+    # A downloaded build counts as deployed only once it has answered. Marking it
+    # earlier is how the old WSL stand ended up pinned to a revision that never
+    # came up.
+    if [ -n "$UPDATED_SHA" ]; then
+      echo "$UPDATED_SHA" >"$STATE_FILE"
+      log "deployed $(short_sha "$UPDATED_SHA")"
     fi
-    app_pid >/dev/null || { warn "the app exited during startup - see logs/app.log"; return 1; }
-    sleep 2
-  done
-  warn "the app did not answer on $APP_PORT within 180s - see logs/app.log"
+    return 0
+  fi
+
+  # Only a fresh download is rolled back: anything else is the jar the operator
+  # asked for, and swapping it out from under them would be worse than failing.
+  if [ -z "$UPDATED_SHA" ] || [ ! -f "$PREVIOUS_JAR" ]; then
+    warn "the app did not come up - see logs/app.log"
+    return 1
+  fi
+
+  warn "$(short_sha "$UPDATED_SHA") did not come up - rolling back to the previous jar"
+  app_stop
+  mv -f "$CURRENT_JAR" "$DEPLOY_DIR/failed.jar"
+  cp -f "$PREVIOUS_JAR" "$CURRENT_JAR"
+  APP_JAR="$CURRENT_JAR"
+  UPDATED_SHA=""
+  launch_app
+  if wait_for_health 90; then
+    log "rolled back - the previous build is up again; the bad one is kept as failed.jar"
+  else
+    warn "the previous jar did not come up either - the stand needs a look (logs/app.log)"
+  fi
   return 1
 }
 
@@ -326,7 +500,7 @@ cmd_app() {
     stop)    app_stop ;;
     status)  app_status ;;
     restart) shift; app_stop; sleep 2; app_start ${1+"$@"} ;;
-    *)       warn "usage: orchstack.sh app [start [--build|--jar PATH]|stop|status|restart]"; return 1 ;;
+    *)       warn "usage: orchstack.sh app [start [--no-update|--build|--jar PATH]|stop|status|restart]"; return 1 ;;
   esac
 }
 
