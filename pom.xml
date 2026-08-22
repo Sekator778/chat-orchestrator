@@ -12,9 +12,9 @@
     </parent>
 
     <groupId>com.example</groupId>
-    <artifactId>telegram-userbot</artifactId>
+    <artifactId>chat-orchestrator</artifactId>
     <version>1.0.0</version>
-    <name>telegram-userbot</name>
+    <name>chat-orchestrator</name>
     <description>Telegram User Bot with Kafka Integration</description>
 
     <properties>

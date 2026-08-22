@@ -7,7 +7,7 @@
 
 spring:
   application:
-    name: telegram-userbot-test
+    name: chat-orchestrator-test
 
   # Database Configuration - Live PostgreSQL (unit_db)
   r2dbc:

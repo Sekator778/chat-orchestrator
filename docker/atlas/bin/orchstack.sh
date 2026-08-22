@@ -53,7 +53,7 @@ SETTINGS_REL="docker/atlas/settings-atlas.xml"
 # is published and carries libtdjni.macos_arm64.dylib, so the jar runs natively -
 # no Rosetta and no linux_amd64_gnu_ssl3-in-a-container fallback needed.
 TD_CLASSIFIER="macos_arm64"
-BUILT_APP_JAR="$PROJECT_ROOT/target/telegram-userbot-1.0.0.jar"
+BUILT_APP_JAR="$PROJECT_ROOT/target/chat-orchestrator-1.0.0.jar"
 
 # What the stand runs, kept outside the repo so a `git clean` cannot wipe a
 # running deployment.

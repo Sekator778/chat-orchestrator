@@ -125,7 +125,7 @@ The application uses `application.yml` for configuration, with profile-specific 
     Alternatively, you can build the JAR and run it:
 
     ```bash
-    java -jar target/telegram-userbot-1.0.0.jar --spring.profiles.active=dev
+    java -jar target/chat-orchestrator-1.0.0.jar --spring.profiles.active=dev
     ```
 
 3.  **Initial Telegram Login**:
