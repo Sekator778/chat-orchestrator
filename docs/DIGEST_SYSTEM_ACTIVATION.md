@@ -100,7 +100,7 @@ export CLUSTERING_JOB_ENABLED=true
 export DIGEST_JOB_ENABLED=true
 
 # Start application
-java -jar target/telegram-userbot-1.0.0.jar --spring.profiles.active=dev
+java -jar target/chat-orchestrator-1.0.0.jar --spring.profiles.active=dev
 ```
 
 ### Step 4: Verify System Status
