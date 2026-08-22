@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # =============================================================================
 # atlas-deliver.sh - build-once / deploy-artifact CD for the atlas stand (macOS,
-# Apple Silicon). CI builds the jar once per merge to main; this script only
-# fetches it and runs it. Nothing is compiled here.
+# Apple Silicon). CI builds the jar once per release commit on main; this script
+# only fetches it and runs it. Nothing is compiled here.
 #
 #   scripts/atlas-deliver.sh [--force]
 #
 # What it does, in order:
-#   1. find the newest successful CI run on main and read its head SHA
+#   1. find the newest successful CI run on the branch that published a deploy
+#      jar, and read its head SHA
 #   2. stop if that SHA is already deployed (state file), so the poll is a no-op
 #   3. download the run's `app-jar-<sha>` artifact
 #   4. rotate it in as current.jar (the jar it replaces becomes previous.jar)
@@ -33,11 +34,12 @@
 #   ORCH_APP_PORT        app port                    (default 8099)
 #   ORCH_REPO            owner/repo for gh           (default: from git remote)
 #   ORCH_BRANCH          branch to follow            (default main)
+#   ORCH_SCAN_RUNS       successful runs to scan     (default 10)
 #   ORCH_ORCHSTACK       path to orchstack.sh        (default: in this repo)
 #
 # Exit codes:
 #   0  deployed, already up to date, or the stand is down (nothing to do)
-#   1  missing tooling, no gh auth, or no successful CI run to deploy
+#   1  missing tooling, no gh auth, or no CI run with a deploy jar to deploy
 #   2  health gate failed, rolled back to previous.jar
 #   3  health gate failed and there was no previous jar - the app is left stopped
 #   4  this SHA already failed the gate before; re-run with --force to retry it
@@ -56,6 +58,9 @@ FAILED_FILE="$DEPLOY_DIR/last-failed"
 ORCHSTACK="${ORCH_ORCHSTACK:-$ROOT/docker/atlas/bin/orchstack.sh}"
 BRANCH="${ORCH_BRANCH:-main}"
 WORKFLOW="ci.yml"
+# How far back to look for a run that actually published a deploy jar. Only ever
+# matters right after a workflow change, when older green runs have no artifact.
+SCAN_RUNS="${ORCH_SCAN_RUNS:-10}"
 APP_PORT="${ORCH_APP_PORT:-8099}"
 HEALTH_URL="http://127.0.0.1:$APP_PORT/actuator/health"
 HEALTH_TIMEOUT="${ORCH_HEALTH_TIMEOUT:-60}"
@@ -65,7 +70,8 @@ PG_CONTAINER="${ORCH_PG_CONTAINER:-tg-orch-postgres}"
 
 FORCE=false
 
-say() { printf '[%s] atlas-deliver: %s\n' "$(date +%Y-%m-%dT%H:%M:%S%z)" "$*"; }
+say()   { printf '[%s] atlas-deliver: %s\n' "$(date +%Y-%m-%dT%H:%M:%S%z)" "$*"; }
+short() { echo "$1" | cut -c1-12; }
 die() { say "ERROR: $*"; exit "${2:-1}"; }
 
 usage() {
@@ -109,26 +115,54 @@ mkdir -p "$DEPLOY_DIR"
 
 # --- what does CI have for us ------------------------------------------------
 
-# `gh --jq` uses the jq built into gh, so no external jq is needed on the Mac.
-run_line="$(gh run list -R "$REPO" --workflow "$WORKFLOW" --branch "$BRANCH" \
-              --status success --limit 1 \
-              --json databaseId,headSha --jq '.[] | "\(.databaseId) \(.headSha)"' || true)"
-[ -n "$run_line" ] || die "no successful '$WORKFLOW' run on $BRANCH in $REPO to deploy"
+# A green run is not automatically a deployable one: runs from before the deploy
+# job existed, and runs whose artifact has aged out of retention, have nothing to
+# download.
+has_deploy_artifact() {
+  gh api "repos/$REPO/actions/runs/$1/artifacts" \
+     --jq '[.artifacts[] | select(.expired == false) | select(.name | startswith("app-jar-"))] | length' \
+     2>/dev/null | grep -qx '[1-9][0-9]*'
+}
 
-run_id="${run_line%% *}"
-sha="${run_line##* }"
-short_sha="$(echo "$sha" | cut -c1-12)"
+# `gh --jq` uses the jq built into gh, so no external jq is needed on the Mac.
+runs="$(gh run list -R "$REPO" --workflow "$WORKFLOW" --branch "$BRANCH" \
+          --status success --limit "$SCAN_RUNS" \
+          --json databaseId,headSha --jq '.[] | "\(.databaseId) \(.headSha)"' || true)"
+[ -n "$runs" ] || die "no successful '$WORKFLOW' run on $BRANCH in $REPO to deploy"
 
 deployed_sha="$(cat "$STATE_FILE" 2>/dev/null || true)"
-if [ "$sha" = "$deployed_sha" ] && [ "$FORCE" = false ]; then
-  say "up to date ($short_sha) - nothing to do"
-  exit 0
-fi
+
+run_id=""
+sha=""
+# Newest first. The redirect (rather than a pipe) keeps the loop in this shell,
+# so it can exit and can hand its findings to the rest of the script.
+while read -r candidate_id candidate_sha; do
+  [ -n "$candidate_id" ] || continue
+  # Walking past what is already deployed means every newer run published no jar,
+  # so there is nothing to deliver. Tested before the artifact lookup, which keeps
+  # the common idle poll at a single API call.
+  if [ "$candidate_sha" = "$deployed_sha" ] && [ "$FORCE" = false ]; then
+    say "up to date ($(short "$candidate_sha")) - nothing to do"
+    exit 0
+  fi
+  if has_deploy_artifact "$candidate_id"; then
+    run_id="$candidate_id"
+    sha="$candidate_sha"
+    break
+  fi
+  say "run $candidate_id ($(short "$candidate_sha")) published no deploy jar - looking further back"
+done <<EOF
+$runs
+EOF
+
+[ -n "$run_id" ] ||
+  die "none of the last $SCAN_RUNS successful runs on $BRANCH published a deploy jar"
+short_sha="$(short "$sha")"
 
 failed_sha="$(cat "$FAILED_FILE" 2>/dev/null || true)"
 if [ "$sha" = "$failed_sha" ] && [ "$FORCE" = false ]; then
   # Without this an unattended timer would restart the stand onto the same broken
-  # jar every 5 minutes for as long as that revision stays the newest green run.
+  # jar on every poll for as long as that revision stays the newest green run.
   say "$short_sha already failed the health gate here - not retrying (use --force)"
   exit 4
 fi
