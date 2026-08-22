@@ -17,7 +17,7 @@
 #
 # The jar defaults to target/telegram-userbot-1.0.0.jar and is built on demand.
 # `--jar PATH` (or APP_JAR=PATH in the environment) points the run at a prebuilt
-# jar instead - that is how scripts/atlas-deliver.sh runs the CI artifact. With an
+# jar instead - that is how scripts/orch-deploy.sh runs the CI artifact. With an
 # explicit jar nothing is ever built: a missing file is an error, not a rebuild.
 set -euo pipefail
 

@@ -53,7 +53,7 @@ hides the `mchv` repository the TDLight artifacts come from.
 ## Continuous delivery (build once in CI, deploy the artifact here)
 
 The stand does not build the mainline any more: `.github/workflows/ci.yml` builds
-the jar once per release commit on `main` and `scripts/atlas-deliver.sh` pulls it
+the jar once per release commit on `main` and `scripts/orch-deploy.sh` pulls it
 in.
 
 Work integrates on `dev` (every pull request merges there, and CI gates it), and
@@ -77,8 +77,8 @@ and remains the way to run an uncommitted working tree.
 
 ```bash
 gh auth login                  # once; the script needs `actions:read`
-scripts/atlas-deliver.sh       # newest green main build -> this stand
-scripts/atlas-deliver.sh --force   # redeploy the same SHA, or retry a failed one
+scripts/orch-deploy.sh       # newest green main build -> this stand
+scripts/orch-deploy.sh --force   # redeploy the same SHA, or retry a failed one
 ```
 
 One run: find the newest successful CI run on `main` **that published a deploy
@@ -101,7 +101,7 @@ Everything lives outside the repo, in `~/.orch-deploy/` (`ORCH_DEPLOY_DIR`):
 | `failed.jar` | the jar of the last failed deploy, kept for a post-mortem |
 | `state` | SHA of the last deploy that passed the health gate |
 | `last-failed` | SHA of the last deploy that failed it |
-| `deliver.log` | where the launchd agent writes (see below) |
+| `deploy.log` | where the launchd agent writes (see below) |
 
 Exit codes: `0` deployed / up to date / stand is down, `1` tooling or no green
 run, `2` gate failed and rolled back, `3` gate failed with no previous jar (the
@@ -120,31 +120,36 @@ reaches the stand without anyone typing anything. It is the macOS counterpart of
 the WSL stand's `ops/systemd/staging-deliver.timer`.
 
 ```bash
-docker/atlas/bin/install-deliver-agent.sh                  # hourly, follows main
-docker/atlas/bin/install-deliver-agent.sh --interval 600   # or every 10 min
-docker/atlas/bin/install-deliver-agent.sh --branch dev     # follow dev instead
-docker/atlas/bin/install-deliver-agent.sh --status
-docker/atlas/bin/install-deliver-agent.sh --uninstall
+docker/atlas/bin/install-deploy-agent.sh                  # hourly, follows main
+docker/atlas/bin/install-deploy-agent.sh --interval 600   # or every 10 min
+docker/atlas/bin/install-deploy-agent.sh --branch dev     # follow dev instead
+docker/atlas/bin/install-deploy-agent.sh --status
+docker/atlas/bin/install-deploy-agent.sh --uninstall
 ```
 
-It renders `docker/atlas/com.example.orch-deliver.plist.example` into
+The script, the agent and the log were called `atlas-deliver` / `orch-deliver` /
+`deliver.log` before. Installing over an old stand is enough: the installer
+unloads the previous agent, deletes its plist and renames the log. The jars and
+the deployed SHA in `~/.orch-deploy/` are untouched, so nothing is re-downloaded.
+
+It renders `docker/atlas/com.chat-orchestrator.deploy.plist.example` into
 `~/Library/LaunchAgents/` and loads it, so the template stays the single source
 of truth. Re-run it to change the interval or the branch — the old agent is
 unloaded first, so installs are idempotent. The agent runs the script out of the
 working copy it was installed from; move the repository and run it again.
 
 ```bash
-launchctl kickstart -p gui/$(id -u)/com.example.orch-deliver   # poll right now
-tail -f ~/.orch-deploy/deliver.log                             # what it did
+launchctl kickstart -p gui/$(id -u)/com.chat-orchestrator.deploy   # poll right now
+tail -f ~/.orch-deploy/deploy.log                             # what it did
 ```
 
 End to end: merge `dev` into `main` → CI builds and publishes `app-jar-<sha>`
 (~1 min) → the next poll picks it up. The default interval is **hourly**; a poll
 that finds nothing costs one API call, so shorten it with `--interval` if you
 want the stand to follow more closely. To deploy a promotion right away instead
-of waiting out the hour, run `scripts/atlas-deliver.sh` or kickstart the agent.
+of waiting out the hour, run `scripts/orch-deploy.sh` or kickstart the agent.
 
-Logs land in `~/.orch-deploy/deliver.log`. It is an agent, not a daemon, because
+Logs land in `~/.orch-deploy/deploy.log`. It is an agent, not a daemon, because
 it needs the logged-in user's Docker socket, `gh` credentials and JDK. Nothing is
 delivered while the containers are down — the poll says so and exits clean.
 
@@ -169,7 +174,7 @@ cannot possibly meet — the deploy fails, `previous.jar` comes back (the recove
 gate keeps a 120s floor of its own) and the exit code is `2`:
 
 ```bash
-ORCH_HEALTH_TIMEOUT=1 scripts/atlas-deliver.sh --force
+ORCH_HEALTH_TIMEOUT=1 scripts/orch-deploy.sh --force
 ```
 
 ## Still to restore from winbox
