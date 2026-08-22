@@ -142,7 +142,7 @@ The frontend in `frontend/` requires **Node.js 24.x** (pinned in `frontend/.nvmr
 
 ## Development Guidelines
 
-Follow conventional-commit style and the existing package layout (see **Architecture Overview** above). Run `mvn clean package` before opening a pull request; integration tests use Testcontainers. Secret scanning runs on every push via `.github/workflows/gitleaks.yml` and locally via the `.pre-commit-config.yaml` gitleaks hook. All pull requests must pass the CI build (`.github/workflows/ci.yml`, `mvn -B -ntp verify`) before they can be merged.
+Follow conventional-commit style and the existing package layout (see **Architecture Overview** above). Run `mvn clean package` before opening a pull request; integration tests use Testcontainers. Secret scanning runs on every push via `.github/workflows/gitleaks.yml` and locally via the `.pre-commit-config.yaml` gitleaks hook. All pull requests must pass the CI build (`.github/workflows/ci.yml`, `mvn -B -ntp verify`) before they can be merged. Open them against `dev`, the integration branch (see [CONTRIBUTING.md](CONTRIBUTING.md)); promoting `dev` into `main` publishes a macOS deploy jar that the local stand picks up on its own (see [docker/atlas/README.md](docker/atlas/README.md)).
 
 ## Data Model Highlights
 
