@@ -8,33 +8,44 @@ rules below are the convention.
 
 | Branch | Created by | Purpose |
 |---|---|---|
-| `main` | — | The single mainline. Always releasable. **Everything merges here.** |
-| `feat/<task-id>` | the SDLC pipeline (real mode), or you by hand | One unit of work — cut from `main`, opened as a PR, deleted after merge. |
+| `dev` | — | The integration branch. **Everything merges here** — humans and agents alike. |
+| `main` | — | The release mainline. Always releasable; `dev` is promoted into it, and the atlas stand deploys from it. |
+| `feat/<task-id>` | the SDLC pipeline (real mode), or you by hand | One unit of work — cut from `dev`, opened as a PR **against `dev`**, deleted after merge. |
 | `phase-b4-poc-*` | the pipeline (PoC mode) | Throwaway demo branches titled `[PoC, DO NOT MERGE]` — never merged. |
 
-- Feature work goes on a `feat/<slug>` branch + PR — **not** straight to `main`.
-- A maintainer may push small docs/ops fixes to `main` directly.
+- Feature work goes on a `feat/<slug>` branch + PR into `dev` — **not** straight
+  to `dev`, and not into `main`.
+- A maintainer may push small docs/ops fixes to `dev` directly.
+- Both branches run the full CI workflow, but only a commit on `main` publishes a
+  deployable jar (`app-jar-<sha>`) — promoting `dev` is what ships to the atlas
+  stand. See `docker/atlas/README.md`.
 
 ## Merge culture
 
-- **One change = one PR = one squash-merge into `main`.** Keep `main` history linear
+- **One change = one PR = one squash-merge into `dev`.** Keep the history linear
   and meaningful; delete the branch after merge.
 - Pipeline PRs stop at a **human merge gate** — a maintainer approves before the
   squash-merge. Nothing auto-merges.
-- `main` is the only long-lived branch; everyone branches from it and returns to it.
+- `dev` and `main` are the long-lived branches; everyone branches from `dev` and
+  returns to it.
+- **Promotion.** `dev` reaches `main` through a maintainer-opened `dev` → `main`
+  pull request, merged (not squashed) so both histories stay comparable. That
+  merge is the deploy trigger: CI publishes the jar and the atlas stand picks it
+  up on its next poll. Nothing is committed to `main` directly except a hotfix,
+  which is merged back into `dev` the same day.
 
 ## The shared-clone rule (important — this is where confusion happens)
 
 The SDLC pipeline operates on this repo's **working tree** — it checks out
 `feat/<task-id>` while a task is running. **Do not commit into the working tree while
 a pipeline task is running on it**: your commit would land on the task's branch
-instead of `main`. If you must commit during a run, use an isolated worktree so the
+instead of `dev`. If you must commit during a run, use an isolated worktree so the
 task's checkout is untouched:
 
 ```bash
-git worktree add /tmp/co-main main
-# edit + commit + push from /tmp/co-main
-git worktree remove /tmp/co-main
+git worktree add /tmp/co-dev dev
+# edit + commit + push from /tmp/co-dev
+git worktree remove /tmp/co-dev
 ```
 
 Otherwise, simply commit when no pipeline task is active.
