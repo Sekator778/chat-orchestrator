@@ -82,7 +82,7 @@ tdlib:
 # Spring Framework Configuration
 spring:
   application:
-    name: telegram-userbot
+    name: chat-orchestrator
 
   cache:
     type: caffeine
