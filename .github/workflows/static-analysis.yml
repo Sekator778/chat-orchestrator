@@ -2,9 +2,9 @@ name: Static Analysis
 
 on:
   push:
-    branches: [main]
+    branches: [dev, main]
   pull_request:
-    branches: [main]
+    branches: [dev, main]
   workflow_dispatch:
 
 # Least-privilege token: read-only, we only upload a report artifact.

@@ -1,14 +1,17 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
-  Example LaunchAgent: poll CI every 5 minutes and deliver the newest green main
-  build to this stand. This is the macOS counterpart of the WSL stand's
+  Example LaunchAgent: poll CI hourly and deliver the newest green main build to
+  this stand. This is the macOS counterpart of the WSL stand's
   ops/systemd/staging-deliver.timer - same job, same cadence, different init.
 
   Optional: scripts/atlas-deliver.sh is idempotent and safe to run by hand, and
   running it by hand is the better default until the stand has proven itself.
 
-  Install (replace the two placeholders first):
+  Install with docker/atlas/bin/install-deliver-agent.sh: it fills the two
+  placeholders in, applies the interval and branch options, and loads the agent.
+  This file is the template it works from; by hand it is the same three steps:
+
     sed -e "s|__REPO_DIR__|$PWD|g" -e "s|__HOME__|$HOME|g" \
       docker/atlas/com.example.orch-deliver.plist.example \
       > ~/Library/LaunchAgents/com.example.orch-deliver.plist
@@ -46,15 +49,22 @@
     <dict>
         <key>PATH</key>
         <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <!-- The branch the stand follows. main carries the promoted releases;
+             the installer rewrites this value. -->
+        <key>ORCH_BRANCH</key>
+        <string>main</string>
     </dict>
 
-    <!-- Every 5 minutes. A poll that finds nothing new exits in about a second:
-         it is one `gh run list` call and a string compare. -->
+    <!-- Hourly; the installer rewrites this value. A poll that finds nothing new
+         exits in about a second (one `gh run list` call and a string compare), so
+         a shorter interval is cheap if you want the stand to follow dev closely.
+         -->
     <key>StartInterval</key>
-    <integer>300</integer>
+    <integer>3600</integer>
 
     <!-- Deliberately false: a deploy on login would restart the app while the
-         stand is still coming up. The first poll follows within 5 minutes. -->
+         stand is still coming up. The first poll follows one interval later; use
+         `launchctl kickstart` when you want one right away. -->
     <key>RunAtLoad</key>
     <false/>
 

@@ -53,7 +53,13 @@ hides the `mchv` repository the TDLight artifacts come from.
 ## Continuous delivery (build once in CI, deploy the artifact here)
 
 The stand does not build the mainline any more: `.github/workflows/ci.yml` builds
-the jar once per merge to `main` and `scripts/atlas-deliver.sh` pulls it in.
+the jar once per release commit on `main` and `scripts/atlas-deliver.sh` pulls it
+in.
+
+Work integrates on `dev` (every pull request merges there, and CI gates it), and
+a `dev` → `main` promotion is what produces a deploy jar. So the stand runs
+promoted releases, not every merged PR. Point it at `dev` instead with
+`ORCH_BRANCH=dev`, or the installer's branch option, when you want the opposite.
 
 Why CI builds a *second* jar rather than shipping the one it tested: the TDLight
 natives are baked into the fat jar at build time, chosen by
@@ -75,7 +81,10 @@ scripts/atlas-deliver.sh       # newest green main build -> this stand
 scripts/atlas-deliver.sh --force   # redeploy the same SHA, or retry a failed one
 ```
 
-One run: find the newest successful CI run on `main`, compare its head SHA with
+One run: find the newest successful CI run on `main` **that published a deploy
+jar** (a green run from before that job existed, or one whose artifact aged out
+of retention, is skipped — `ORCH_SCAN_RUNS`, default 10, bounds how far back it
+looks), compare its head SHA with
 what is deployed, download `app-jar-<sha>`, restart the app from it, and gate on
 `HTTP 200` from `/actuator/health` (60s, `ORCH_HEALTH_TIMEOUT`). **The SHA is
 recorded only after that gate passes** — the WSL stand's `staging-watch.sh`
@@ -97,32 +106,47 @@ Everything lives outside the repo, in `~/.orch-deploy/` (`ORCH_DEPLOY_DIR`):
 Exit codes: `0` deployed / up to date / stand is down, `1` tooling or no green
 run, `2` gate failed and rolled back, `3` gate failed with no previous jar (the
 app is left stopped), `4` this SHA already failed here — `--force` retries it.
-That last guard is what keeps a broken mainline from restarting the stand every
-five minutes.
+That last guard is what keeps a broken mainline from restarting the stand on
+every poll.
 
 A stand whose containers are down is not an error: the script says so and exits
 `0`. It also never resurrects an app that died on its own — it only reacts to a
 new SHA. Use `orchstack.sh app start` for that.
 
-### Automate it (optional)
+### Automate it — a promotion to `main` lands here on its own
 
-`docker/atlas/com.example.orch-deliver.plist.example` is a LaunchAgent that runs
-the script every 5 minutes — the macOS counterpart of the WSL stand's
-`ops/systemd/staging-deliver.timer`. Install:
+A LaunchAgent polls CI and delivers whatever is newest; that is how a merged PR
+reaches the stand without anyone typing anything. It is the macOS counterpart of
+the WSL stand's `ops/systemd/staging-deliver.timer`.
 
 ```bash
-sed -e "s|__REPO_DIR__|$PWD|g" -e "s|__HOME__|$HOME|g" \
-  docker/atlas/com.example.orch-deliver.plist.example \
-  > ~/Library/LaunchAgents/com.example.orch-deliver.plist
-plutil -lint ~/Library/LaunchAgents/com.example.orch-deliver.plist
-mkdir -p ~/.orch-deploy
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.example.orch-deliver.plist
-launchctl kickstart -p gui/$(id -u)/com.example.orch-deliver   # run one poll now
-launchctl bootout   gui/$(id -u)/com.example.orch-deliver      # uninstall
+docker/atlas/bin/install-deliver-agent.sh                  # hourly, follows main
+docker/atlas/bin/install-deliver-agent.sh --interval 600   # or every 10 min
+docker/atlas/bin/install-deliver-agent.sh --branch dev     # follow dev instead
+docker/atlas/bin/install-deliver-agent.sh --status
+docker/atlas/bin/install-deliver-agent.sh --uninstall
 ```
 
+It renders `docker/atlas/com.example.orch-deliver.plist.example` into
+`~/Library/LaunchAgents/` and loads it, so the template stays the single source
+of truth. Re-run it to change the interval or the branch — the old agent is
+unloaded first, so installs are idempotent. The agent runs the script out of the
+working copy it was installed from; move the repository and run it again.
+
+```bash
+launchctl kickstart -p gui/$(id -u)/com.example.orch-deliver   # poll right now
+tail -f ~/.orch-deploy/deliver.log                             # what it did
+```
+
+End to end: merge `dev` into `main` → CI builds and publishes `app-jar-<sha>`
+(~1 min) → the next poll picks it up. The default interval is **hourly**; a poll
+that finds nothing costs one API call, so shorten it with `--interval` if you
+want the stand to follow more closely. To deploy a promotion right away instead
+of waiting out the hour, run `scripts/atlas-deliver.sh` or kickstart the agent.
+
 Logs land in `~/.orch-deploy/deliver.log`. It is an agent, not a daemon, because
-it needs the logged-in user's Docker socket, `gh` credentials and JDK.
+it needs the logged-in user's Docker socket, `gh` credentials and JDK. Nothing is
+delivered while the containers are down — the poll says so and exits clean.
 
 ### Rollback
 
