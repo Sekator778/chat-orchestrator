@@ -2,9 +2,11 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # dev is the integration branch every PR merges into; main is the release
+    # mainline it is promoted to, and the branch the atlas stand deploys from.
+    branches: [dev, main]
   pull_request:
-    branches: [main]
+    branches: [dev, main]
     types: [opened, synchronize, reopened]
   workflow_dispatch:
 
@@ -26,9 +28,11 @@ jobs:
     timeout-minutes: 25
 
     env:
-      # The deployable jar is published after a green verify on the mainline
-      # (post-merge) and on a manual dispatch used to smoke-test this workflow.
-      # Pull requests build and test only - they publish nothing.
+      # The deployable jar is published after a green verify on main - that is,
+      # once dev has been promoted - and on a manual dispatch used to smoke-test
+      # this workflow. dev is where work integrates and is gated by this same
+      # workflow, but it publishes nothing: the stand deploys releases, not every
+      # merged pull request. Pull requests build and test only.
       PUBLISH_DEPLOY_JAR: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main') }}
 
     steps:
