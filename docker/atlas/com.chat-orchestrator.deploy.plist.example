@@ -5,24 +5,24 @@
   this stand. This is the macOS counterpart of the WSL stand's
   ops/systemd/staging-deliver.timer - same job, same cadence, different init.
 
-  Optional: scripts/atlas-deliver.sh is idempotent and safe to run by hand, and
+  Optional: scripts/orch-deploy.sh is idempotent and safe to run by hand, and
   running it by hand is the better default until the stand has proven itself.
 
-  Install with docker/atlas/bin/install-deliver-agent.sh: it fills the two
+  Install with docker/atlas/bin/install-deploy-agent.sh: it fills the two
   placeholders in, applies the interval and branch options, and loads the agent.
   This file is the template it works from; by hand it is the same three steps:
 
     sed -e "s|__REPO_DIR__|$PWD|g" -e "s|__HOME__|$HOME|g" \
-      docker/atlas/com.example.orch-deliver.plist.example \
-      > ~/Library/LaunchAgents/com.example.orch-deliver.plist
-    plutil -lint ~/Library/LaunchAgents/com.example.orch-deliver.plist
+      docker/atlas/com.chat-orchestrator.deploy.plist.example \
+      > ~/Library/LaunchAgents/com.chat-orchestrator.deploy.plist
+    plutil -lint ~/Library/LaunchAgents/com.chat-orchestrator.deploy.plist
     mkdir -p ~/.orch-deploy
-    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.example.orch-deliver.plist
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.chat-orchestrator.deploy.plist
 
   Run once on demand / inspect / remove:
-    launchctl kickstart -p gui/$(id -u)/com.example.orch-deliver
-    launchctl print gui/$(id -u)/com.example.orch-deliver
-    launchctl bootout gui/$(id -u)/com.example.orch-deliver
+    launchctl kickstart -p gui/$(id -u)/com.chat-orchestrator.deploy
+    launchctl print gui/$(id -u)/com.chat-orchestrator.deploy
+    launchctl bootout gui/$(id -u)/com.chat-orchestrator.deploy
 
   It is a LaunchAgent, not a LaunchDaemon, on purpose: it needs the logged-in
   user's Docker socket, gh credentials and JDK, none of which a root daemon has.
@@ -30,7 +30,7 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.example.orch-deliver</string>
+    <string>com.chat-orchestrator.deploy</string>
 
     <!-- A login shell picks up the user's PATH (Homebrew gh, sdkman JDK, docker
          from OrbStack); EnvironmentVariables below is the fallback for the case
@@ -39,7 +39,7 @@
     <array>
         <string>/bin/bash</string>
         <string>-lc</string>
-        <string>exec __REPO_DIR__/scripts/atlas-deliver.sh</string>
+        <string>exec __REPO_DIR__/scripts/orch-deploy.sh</string>
     </array>
 
     <key>WorkingDirectory</key>
@@ -69,8 +69,8 @@
     <false/>
 
     <key>StandardOutPath</key>
-    <string>__HOME__/.orch-deploy/deliver.log</string>
+    <string>__HOME__/.orch-deploy/deploy.log</string>
     <key>StandardErrorPath</key>
-    <string>__HOME__/.orch-deploy/deliver.log</string>
+    <string>__HOME__/.orch-deploy/deploy.log</string>
 </dict>
 </plist>
