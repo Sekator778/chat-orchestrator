@@ -18,9 +18,10 @@ Ports are shifted off the ones other local stacks on this machine hold
 
 ```bash
 docker/atlas/bin/orchstack.sh up            # containers, wait until healthy
-docker/atlas/bin/orchstack.sh app start     # build if needed, then run the jar
-docker/atlas/bin/orchstack.sh app start --build   # force a rebuild first
-docker/atlas/bin/orchstack.sh app start --jar PATH  # run a jar built elsewhere (CI)
+docker/atlas/bin/orchstack.sh app start     # update from main if newer, then run
+docker/atlas/bin/orchstack.sh app start --no-update  # run what is already here
+docker/atlas/bin/orchstack.sh app start --build      # build this working copy
+docker/atlas/bin/orchstack.sh app start --jar PATH   # run one specific jar
 docker/atlas/bin/orchstack.sh status        # containers + app health
 docker/atlas/bin/orchstack.sh logs [svc]    # follow container logs
 docker/atlas/bin/orchstack.sh sql           # psql as the application user
@@ -50,132 +51,87 @@ JAVA_HOME=$HOME/.sdkman/candidates/java/21.0.11-oracle \
 `~/.m2/settings.xml` is offline and mirrors every repository id to Central, which
 hides the `mchv` repository the TDLight artifacts come from.
 
-## Continuous delivery (build once in CI, deploy the artifact here)
+## Updates: the stand refreshes itself when you start it
 
-The stand does not build the mainline any more: `.github/workflows/ci.yml` builds
-the jar once per release commit on `main` and `scripts/orch-deploy.sh` pulls it
-in.
-
-Work integrates on `dev` (every pull request merges there, and CI gates it), and
-a `dev` → `main` promotion is what produces a deploy jar. So the stand runs
-promoted releases, not every merged PR. Point it at `dev` instead with
-`ORCH_BRANCH=dev`, or the installer's branch option, when you want the opposite.
-
-Why CI builds a *second* jar rather than shipping the one it tested: the TDLight
-natives are baked into the fat jar at build time, chosen by
-`-Dtdlight.native.classifier`. The tested jar carries `linux_amd64_gnu_ssl3` and
-cannot start natively on this Mac, so the workflow adds a
-`-Dtdlight.native.classifier=macos_arm64 -DskipTests` build and publishes that as
-`app-jar-<sha>`. The natives are an ordinary Maven artifact, so building the
-macOS jar on an ubuntu runner is fine; CI asserts the right natives are inside
-before uploading, and the deliver script checks again before installing.
-
-`orchstack.sh app start --build` still builds locally — that path is untouched
-and remains the way to run an uncommitted working tree.
-
-### Deliver by hand
+There is no timer, no agent and nothing polling in the background. Starting the
+app is the update:
 
 ```bash
-gh auth login                  # once; the script needs `actions:read`
-scripts/orch-deploy.sh       # newest green main build -> this stand
-scripts/orch-deploy.sh --force   # redeploy the same SHA, or retry a failed one
+docker/atlas/bin/orchstack.sh up
+docker/atlas/bin/orchstack.sh app start
 ```
 
-One run: find the newest successful CI run on `main` **that published a deploy
-jar** (a green run from before that job existed, or one whose artifact aged out
-of retention, is skipped — `ORCH_SCAN_RUNS`, default 10, bounds how far back it
-looks), compare its head SHA with
-what is deployed, download `app-jar-<sha>`, restart the app from it, and gate on
-`HTTP 200` from `/actuator/health` (60s, `ORCH_HEALTH_TIMEOUT`). **The SHA is
-recorded only after that gate passes** — the WSL stand's `staging-watch.sh`
-marked the revision before the deploy was proven and then sat on a dead build
-believing it was current. A second run on the same SHA is a no-op, so the script
-is safe to poll.
+`app start` asks GitHub whether `main` carries a build newer than the one
+deployed here. If it does, the jar is downloaded and started. If it does not — or
+there is no network, no `gh`, no artifact — the jar already in `~/.orch-deploy`
+starts instead. Either way the stand comes up; the check never blocks it. Whatever
+lands on `main` after that is picked up the next time you start the app.
 
-Everything lives outside the repo, in `~/.orch-deploy/` (`ORCH_DEPLOY_DIR`):
+CI builds that jar once per commit on `main` (`.github/workflows/ci.yml`) and it
+carries the macOS/arm64 TDLight natives. That matters: the natives are baked into
+the fat jar at build time, so the jar CI *tests* (linux classifier) cannot start
+natively here — the workflow builds the deploy jar separately with
+`-Dtdlight.native.classifier=macos_arm64` and publishes it as `app-jar-<sha>`.
+Work integrates on `dev`, and promoting `dev` into `main` is what produces a
+build this stand will take.
+
+`gh auth login` once — the download needs `actions:read`.
+
+### The other ways to start
+
+```bash
+docker/atlas/bin/orchstack.sh app start --no-update    # run what is here, no GitHub
+docker/atlas/bin/orchstack.sh app start --build        # build this working copy
+docker/atlas/bin/orchstack.sh app start --jar PATH     # run one specific jar
+```
+
+`--build` is the way to run uncommitted work; `--no-update` is for offline or when
+you deliberately want to stay on the current build.
+
+### What lives in ~/.orch-deploy
 
 | File | Meaning |
 |---|---|
-| `current.jar` | what the app runs now |
-| `previous.jar` | last known-good jar — the rollback target |
-| `failed.jar` | the jar of the last failed deploy, kept for a post-mortem |
-| `state` | SHA of the last deploy that passed the health gate |
-| `last-failed` | SHA of the last deploy that failed it |
-| `deploy.log` | where the launchd agent writes (see below) |
+| `current.jar` | what the app runs |
+| `previous.jar` | the build before it — the rollback target |
+| `failed.jar` | a downloaded build that would not come up, kept for a post-mortem |
+| `state` | SHA of the build that last came up healthy |
 
-Exit codes: `0` deployed / up to date / stand is down, `1` tooling or no green
-run, `2` gate failed and rolled back, `3` gate failed with no previous jar (the
-app is left stopped), `4` this SHA already failed here — `--force` retries it.
-That last guard is what keeps a broken mainline from restarting the stand on
-every poll.
+It is outside the repository on purpose: `git clean` cannot wipe a running
+deployment.
 
-A stand whose containers are down is not an error: the script says so and exits
-`0`. It also never resurrects an app that died on its own — it only reacts to a
-new SHA. Use `orchstack.sh app start` for that.
+### Failure and rollback
 
-### Automate it — a promotion to `main` lands here on its own
+A downloaded build has to answer `HTTP 200` on `/actuator/health` before it counts
+as deployed — `state` is written only then. The predecessor of this setup on the
+WSL stand marked the revision before the deploy was proven, and one broken build
+left the stand pinned to a revision that never came up.
 
-A LaunchAgent polls CI and delivers whatever is newest; that is how a merged PR
-reaches the stand without anyone typing anything. It is the macOS counterpart of
-the WSL stand's `ops/systemd/staging-deliver.timer`.
+If a freshly downloaded build does not come up, `app start` puts it aside as
+`failed.jar`, restores `previous.jar` and starts that, leaves `state` pointing at
+the older working build, and exits non-zero. A jar you asked for by hand
+(`--jar`, `--build`) is never swapped out from under you — it just fails.
 
-```bash
-docker/atlas/bin/install-deploy-agent.sh                  # hourly, follows main
-docker/atlas/bin/install-deploy-agent.sh --interval 600   # or every 10 min
-docker/atlas/bin/install-deploy-agent.sh --branch dev     # follow dev instead
-docker/atlas/bin/install-deploy-agent.sh --status
-docker/atlas/bin/install-deploy-agent.sh --uninstall
-```
-
-The script, the agent and the log were called `atlas-deliver` / `orch-deliver` /
-`deliver.log` before. Installing over an old stand is enough: the installer
-unloads the previous agent, deletes its plist and renames the log. The jars and
-the deployed SHA in `~/.orch-deploy/` are untouched, so nothing is re-downloaded.
-
-It renders `docker/atlas/com.chat-orchestrator.deploy.plist.example` into
-`~/Library/LaunchAgents/` and loads it, so the template stays the single source
-of truth. Re-run it to change the interval or the branch — the old agent is
-unloaded first, so installs are idempotent. The agent runs the script out of the
-working copy it was installed from; move the repository and run it again.
-
-```bash
-launchctl kickstart -p gui/$(id -u)/com.chat-orchestrator.deploy   # poll right now
-tail -f ~/.orch-deploy/deploy.log                             # what it did
-```
-
-End to end: merge `dev` into `main` → CI builds and publishes `app-jar-<sha>`
-(~1 min) → the next poll picks it up. The default interval is **hourly**; a poll
-that finds nothing costs one API call, so shorten it with `--interval` if you
-want the stand to follow more closely. To deploy a promotion right away instead
-of waiting out the hour, run `scripts/orch-deploy.sh` or kickstart the agent.
-
-Logs land in `~/.orch-deploy/deploy.log`. It is an agent, not a daemon, because
-it needs the logged-in user's Docker socket, `gh` credentials and JDK. Nothing is
-delivered while the containers are down — the poll says so and exits clean.
-
-### Rollback
-
-Automatic on a failed health gate: the app is stopped, the bad jar is moved aside
-to `failed.jar`, `previous.jar` is restored and started, and the script exits
-non-zero with the state file still pointing at the older, working SHA.
-
-By hand:
+To go back a version deliberately:
 
 ```bash
 docker/atlas/bin/orchstack.sh app stop
 cp ~/.orch-deploy/previous.jar ~/.orch-deploy/current.jar
-docker/atlas/bin/orchstack.sh app start --jar ~/.orch-deploy/current.jar
-# and stop the next poll from re-installing the bad build:
-echo "<sha-to-skip>" > ~/.orch-deploy/last-failed
+docker/atlas/bin/orchstack.sh app start --no-update
 ```
 
-To rehearse the rollback path on a healthy stand, give the gate a budget the app
-cannot possibly meet — the deploy fails, `previous.jar` comes back (the recovery
-gate keeps a 120s floor of its own) and the exit code is `2`:
+`--no-update` matters there: without it the newer build is fetched again.
+
+### Which version is running
 
 ```bash
-ORCH_HEALTH_TIMEOUT=1 scripts/orch-deploy.sh --force
+cat ~/.orch-deploy/state
+curl -s localhost:8099/actuator/info
+docker/atlas/bin/orchstack.sh app status
 ```
+
+`state` is the SHA, `/actuator/info` is the build stamp from inside the running
+process, and `app status` shows the PID and the jar path it was started from.
 
 ## Still to restore from winbox
 
