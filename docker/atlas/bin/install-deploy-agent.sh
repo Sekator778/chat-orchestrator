@@ -1,26 +1,26 @@
 #!/usr/bin/env bash
 # =============================================================================
-# install-deliver-agent.sh - install (or remove) the LaunchAgent that polls CI
-# and delivers new builds to this stand. macOS counterpart of the WSL stand's
+# install-deploy-agent.sh - install (or remove) the LaunchAgent that polls CI and
+# deploys new builds to this stand. macOS counterpart of the WSL stand's
 # ops/install-staging-timer.sh.
 #
-#   docker/atlas/bin/install-deliver-agent.sh                 install, hourly, main
-#   docker/atlas/bin/install-deliver-agent.sh --interval 600  poll every 10 minutes
-#   docker/atlas/bin/install-deliver-agent.sh --branch dev    follow dev instead
-#   docker/atlas/bin/install-deliver-agent.sh --status        is it loaded?
-#   docker/atlas/bin/install-deliver-agent.sh --uninstall     unload and delete
+#   docker/atlas/bin/install-deploy-agent.sh                 install, hourly, main
+#   docker/atlas/bin/install-deploy-agent.sh --interval 600  poll every 10 minutes
+#   docker/atlas/bin/install-deploy-agent.sh --branch dev    follow dev instead
+#   docker/atlas/bin/install-deploy-agent.sh --status        is it loaded?
+#   docker/atlas/bin/install-deploy-agent.sh --uninstall     unload and delete
 #
-# It renders docker/atlas/com.example.orch-deliver.plist.example into
+# It renders docker/atlas/com.chat-orchestrator.deploy.plist.example into
 # ~/Library/LaunchAgents/, so the template stays the single source of truth for
 # what the agent does. Re-running it is how you change the interval or branch:
 # the old agent is unloaded first, so installs are idempotent.
 #
-# The agent runs scripts/atlas-deliver.sh out of THIS working copy. Move the
+# The agent runs scripts/orch-deploy.sh out of THIS working copy. Move the
 # repository and you have to run this again.
 # =============================================================================
 set -euo pipefail
 
-LABEL="com.example.orch-deliver"
+LABEL="com.chat-orchestrator.deploy"
 STACK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPO_DIR="$(cd "$STACK_DIR/../.." && pwd)"
 TEMPLATE="$STACK_DIR/$LABEL.plist.example"
@@ -74,7 +74,7 @@ case "$ACTION" in
       log "$LABEL is loaded"
       launchctl print "$domain/$LABEL" | grep -E 'state|program|last exit' || true
       [ -f "$DEPLOY_DIR/state" ] && log "deployed SHA: $(cat "$DEPLOY_DIR/state")"
-      log "log: $DEPLOY_DIR/deliver.log"
+      log "log: $DEPLOY_DIR/deploy.log"
     else
       log "$LABEL is not loaded"
     fi
@@ -89,11 +89,27 @@ esac
 # --- install -----------------------------------------------------------------
 
 [ -f "$TEMPLATE" ] || die "$TEMPLATE is missing"
-[ -x "$REPO_DIR/scripts/atlas-deliver.sh" ] || die "$REPO_DIR/scripts/atlas-deliver.sh is missing or not executable"
+[ -x "$REPO_DIR/scripts/orch-deploy.sh" ] || die "$REPO_DIR/scripts/orch-deploy.sh is missing or not executable"
 if ! command -v gh >/dev/null 2>&1; then
   warn "the gh CLI is not on PATH - the agent can only log errors until 'brew install gh' and 'gh auth login'"
 elif ! gh auth status >/dev/null 2>&1; then
   warn "gh is not authenticated - run 'gh auth login' or the agent can only log errors"
+fi
+
+# The agent used to be called orch-deliver, under a com.example label. Its
+# directory is unchanged, so the only leftovers to clear are the old launchd job,
+# its plist and the log file under its old name.
+LEGACY_LABEL="com.example.orch-deliver"
+if launchctl print "$domain/$LEGACY_LABEL" >/dev/null 2>&1; then
+  log "unloading the old $LEGACY_LABEL agent"
+  launchctl bootout "$domain/$LEGACY_LABEL" 2>/dev/null || true
+fi
+if [ -f "$AGENT_DIR/$LEGACY_LABEL.plist" ]; then
+  rm -f "$AGENT_DIR/$LEGACY_LABEL.plist"
+  log "removed the old agent plist"
+fi
+if [ -f "$DEPLOY_DIR/deliver.log" ] && [ ! -f "$DEPLOY_DIR/deploy.log" ]; then
+  mv "$DEPLOY_DIR/deliver.log" "$DEPLOY_DIR/deploy.log"
 fi
 
 mkdir -p "$AGENT_DIR" "$DEPLOY_DIR"
@@ -111,7 +127,7 @@ log "installed $LABEL - every ${INTERVAL}s, following '$BRANCH', from $REPO_DIR"
 cat <<EOF
 
   run one poll now   launchctl kickstart -p $domain/$LABEL
-  watch it           tail -f $DEPLOY_DIR/deliver.log
+  watch it           tail -f $DEPLOY_DIR/deploy.log
   is it loaded       $0 --status
   remove             $0 --uninstall
 

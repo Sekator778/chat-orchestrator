@@ -86,7 +86,7 @@ jobs:
         if: env.PUBLISH_DEPLOY_JAR == 'true'
         uses: actions/upload-artifact@v7
         with:
-          # scripts/atlas-deliver.sh resolves the artifact of the latest successful
+          # scripts/orch-deploy.sh resolves the artifact of the latest successful
           # run on main; the SHA in the name is what the stand records as deployed.
           name: app-jar-${{ github.sha }}
           path: target/telegram-userbot-1.0.0.jar
