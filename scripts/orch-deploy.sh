@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # =============================================================================
-# atlas-deliver.sh - build-once / deploy-artifact CD for the atlas stand (macOS,
+# orch-deploy.sh - build-once / deploy-artifact CD for the atlas stand (macOS,
 # Apple Silicon). CI builds the jar once per release commit on main; this script
 # only fetches it and runs it. Nothing is compiled here.
 #
-#   scripts/atlas-deliver.sh [--force]
+#   scripts/orch-deploy.sh [--force]
 #
 # What it does, in order:
 #   1. find the newest successful CI run on the branch that published a deploy
@@ -70,7 +70,7 @@ PG_CONTAINER="${ORCH_PG_CONTAINER:-tg-orch-postgres}"
 
 FORCE=false
 
-say()   { printf '[%s] atlas-deliver: %s\n' "$(date +%Y-%m-%dT%H:%M:%S%z)" "$*"; }
+say()   { printf '[%s] orch-deploy: %s\n' "$(date +%Y-%m-%dT%H:%M:%S%z)" "$*"; }
 short() { echo "$1" | cut -c1-12; }
 die() { say "ERROR: $*"; exit "${2:-1}"; }
 
