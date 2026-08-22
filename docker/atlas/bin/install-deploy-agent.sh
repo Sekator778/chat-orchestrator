@@ -132,6 +132,7 @@ cat <<EOF
   remove             $0 --uninstall
 
 The first poll runs within ${INTERVAL}s (not at load time, on purpose). Nothing
-is delivered while the stand's containers are down - bring them up with
-'docker/atlas/bin/orchstack.sh up'.
+is deployed unless the stand is up AND the app is running - the agent replaces a
+running app, it never starts one. Bring the stand up with
+'docker/atlas/bin/orchstack.sh up' and 'orchstack.sh app start'.
 EOF

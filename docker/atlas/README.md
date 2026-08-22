@@ -109,9 +109,21 @@ app is left stopped), `4` this SHA already failed here — `--force` retries it.
 That last guard is what keeps a broken mainline from restarting the stand on
 every poll.
 
-A stand whose containers are down is not an error: the script says so and exits
-`0`. It also never resurrects an app that died on its own — it only reacts to a
-new SHA. Use `orchstack.sh app start` for that.
+**It only updates a stand that is actually running.** Before anything else the
+script checks that the containers are up *and* that something answers on port
+8099. If the app is stopped it says so and exits `0` without downloading
+anything: a stopped app is somebody's decision, not a fault for an unattended
+poll to repair. Same for a stand whose containers are down. Nothing is ever
+started behind your back — the script replaces a running app, it does not launch
+one.
+
+Two consequences worth knowing. A stand you left stopped stays on whatever jar it
+has until you start it yourself; run `orchstack.sh app start --jar
+~/.orch-deploy/current.jar` and the next poll takes over from there. And a deploy
+that failed its health gate with no previous jar to fall back on leaves the app
+stopped, which means later polls skip it — no restart loop against a broken
+build. To bootstrap a stand that has never run a jar, pass
+`ORCH_REQUIRE_RUNNING=false` once.
 
 ### Automate it — a promotion to `main` lands here on its own
 

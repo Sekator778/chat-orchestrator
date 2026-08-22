@@ -6,7 +6,12 @@
 #
 #   scripts/orch-deploy.sh [--force]
 #
+# It only ever updates a stand that is actually in use: if the app is not running
+# it does nothing at all. A stopped app is somebody's decision, not a fault for an
+# unattended poll to repair.
+#
 # What it does, in order:
+#   0. do nothing unless the containers are up and the app is answering
 #   1. find the newest successful CI run on the branch that published a deploy
 #      jar, and read its head SHA
 #   2. stop if that SHA is already deployed (state file), so the poll is a no-op
@@ -35,10 +40,11 @@
 #   ORCH_REPO            owner/repo for gh           (default: from git remote)
 #   ORCH_BRANCH          branch to follow            (default main)
 #   ORCH_SCAN_RUNS       successful runs to scan     (default 10)
+#   ORCH_REQUIRE_RUNNING deploy only onto a running app (default true)
 #   ORCH_ORCHSTACK       path to orchstack.sh        (default: in this repo)
 #
 # Exit codes:
-#   0  deployed, already up to date, or the stand is down (nothing to do)
+#   0  deployed, already up to date, or the stand is not running (nothing to do)
 #   1  missing tooling, no gh auth, or no CI run with a deploy jar to deploy
 #   2  health gate failed, rolled back to previous.jar
 #   3  health gate failed and there was no previous jar - the app is left stopped
@@ -67,6 +73,9 @@ HEALTH_TIMEOUT="${ORCH_HEALTH_TIMEOUT:-60}"
 # The stand's Postgres. The app cannot boot without it, so an absent container
 # means the stand is simply not up rather than that the delivery failed.
 PG_CONTAINER="${ORCH_PG_CONTAINER:-tg-orch-postgres}"
+# Deploy onto a running app only. Set to false for the one case where starting
+# the app is the point: bootstrapping a stand that has never run a jar.
+REQUIRE_RUNNING="${ORCH_REQUIRE_RUNNING:-true}"
 
 FORCE=false
 
@@ -97,12 +106,24 @@ gh auth status >/dev/null 2>&1 || die "gh is not authenticated - run 'gh auth lo
 # The stand being down is a normal state on a laptop, not a delivery failure:
 # report it and leave the exit code clean so an unattended timer stays quiet.
 if ! docker info >/dev/null 2>&1; then
-  say "the Docker engine is not running - the stand is down, nothing to deliver"
+  say "the Docker engine is not running - the stand is down, nothing to deploy"
   exit 0
 fi
 if ! docker ps --format '{{.Names}}' | grep -qx "$PG_CONTAINER"; then
-  say "$PG_CONTAINER is not running - the stand is down (run 'orchstack.sh up'), nothing to deliver"
+  say "$PG_CONTAINER is not running - the stand is down (run 'orchstack.sh up'), nothing to deploy"
   exit 0
+fi
+
+# The app itself must be up. Any HTTP answer counts as running - a sick app is
+# still an app somebody is using, and replacing it with a newer build is the
+# right move; silence on the port means nobody is running the stand.
+if [ "$REQUIRE_RUNNING" = true ]; then
+  app_code="$(curl -s -o /dev/null -m 3 -w '%{http_code}' "$HEALTH_URL" 2>/dev/null || true)"
+  if [ -z "$app_code" ] || [ "$app_code" = "000" ]; then
+    say "nothing is answering on port $APP_PORT - the app is not running, nothing to deploy"
+    say "start it with 'orchstack.sh app start --jar $CURRENT_JAR', or pass ORCH_REQUIRE_RUNNING=false to deploy onto a stopped stand"
+    exit 0
+  fi
 fi
 
 REPO="${ORCH_REPO:-}"
