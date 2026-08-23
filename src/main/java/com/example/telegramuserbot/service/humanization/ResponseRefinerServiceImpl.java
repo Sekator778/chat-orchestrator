@@ -61,12 +61,12 @@ public class ResponseRefinerServiceImpl implements ResponseRefinerService {
     }
 
     @Override
-    public Mono<String> refineResponse(String originalResponse, String userQuestion, Long userId) {
+    public Mono<String> refineResponse(String originalResponse, String userQuestion, Long userId, String botId) {
         log.debug("Refining response for potential AI indicators");
 
         if (originalResponse == null || originalResponse.isBlank()) {
             log.debug("Original response is empty, using alternative response");
-            return Mono.fromSupplier(() -> generateAlternativeResponse(userQuestion, userId));
+            return Mono.fromSupplier(() -> generateAlternativeResponse(userQuestion, userId, botId));
         }
 
         if (!needsRefinement(originalResponse)) {
@@ -75,7 +75,7 @@ public class ResponseRefinerServiceImpl implements ResponseRefinerService {
         }
 
         log.warn("Response needs refinement, applying secondary LLM processing");
-        String refinementPrompt = buildRefinementPrompt(originalResponse, userQuestion);
+        String refinementPrompt = buildRefinementPrompt(originalResponse, userQuestion, botId);
         DeepSeekChatRequest request = new DeepSeekChatRequest(
                 List.of(new ApiMessage("user", refinementPrompt)),
                 null,
@@ -90,12 +90,12 @@ public class ResponseRefinerServiceImpl implements ResponseRefinerService {
                 .filter(refined -> !needsRefinement(refined))
                 .switchIfEmpty(Mono.fromSupplier(() -> {
                     log.warn("Refined response still contains AI indicators or is empty, using fallback");
-                    return generateAlternativeResponse(userQuestion, userId);
+                    return generateAlternativeResponse(userQuestion, userId, botId);
                 }))
                 .doOnSuccess(refined -> log.debug("Response successfully refined"))
                 .onErrorResume(error -> {
                     log.error("Error during response refinement: {}", error.getMessage(), error);
-                    return Mono.fromSupplier(() -> generateAlternativeResponse(userQuestion, userId));
+                    return Mono.fromSupplier(() -> generateAlternativeResponse(userQuestion, userId, botId));
                 });
     }
 
@@ -117,9 +117,9 @@ public class ResponseRefinerServiceImpl implements ResponseRefinerService {
     }
 
     @Override
-    public String generateAlternativeResponse(String userQuestion, Long userId) {
+    public String generateAlternativeResponse(String userQuestion, Long userId, String botId) {
         // First, try to get a persona-specific response
-        String personaResponse = personaService.getPersonaResponse(userQuestion);
+        String personaResponse = personaService.getPersonaResponse(userQuestion, botId);
         if (personaResponse != null) {
             log.debug("Using persona-specific alternative response");
             return personaResponse;
@@ -140,8 +140,8 @@ public class ResponseRefinerServiceImpl implements ResponseRefinerService {
         return GENERAL_DEFLECTIONS.get((int) (Math.random() * GENERAL_DEFLECTIONS.size()));
     }
 
-    private String buildRefinementPrompt(String originalResponse, String userQuestion) {
-        String personaIdentity = personaService.getBotIdentity();
+    private String buildRefinementPrompt(String originalResponse, String userQuestion, String botId) {
+        String personaIdentity = personaService.getBotIdentity(botId);
         return String.format("""
                 Ти %s - звичайна людина, яка допомагає переписати відповідь так, щоб вона звучала природно.
                 
@@ -159,6 +159,6 @@ public class ResponseRefinerServiceImpl implements ResponseRefinerService {
                 8. Відповідай від імені %s
                 
                 Відповідь як звичайна людина:
-                """, personaIdentity, userQuestion, originalResponse, personaService.getBotName());
+                """, personaIdentity, userQuestion, originalResponse, personaService.getBotName(botId));
     }
 }

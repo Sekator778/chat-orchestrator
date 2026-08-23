@@ -275,7 +275,8 @@ public class MultiStageResponseHandler {
                                                      ResponseDirectives directives) {
         int resolvedAttempt = Math.max(1, attempt);
         return runDraft(chatId, triggeringMessageId, cfg, template, context, settings, snapshot, plan, selfUserId, tracker, resolvedAttempt, directives)
-                .flatMap(draft -> applyAntiDetectionAndRefine(chatId, triggeringMessageId, rawText, draft, context, settings, tracker, resolvedAttempt))
+                .flatMap(draft -> applyAntiDetectionAndRefine(chatId, triggeringMessageId, rawText, draft, context, settings, tracker, resolvedAttempt,
+                        cfg != null ? cfg.botInstanceId() : null))
                 .flatMap(result -> {
                     if (!result.shouldRetry() || resolvedAttempt >= MAX_DRAFT_ATTEMPTS) {
                         return Mono.just(result.text());
@@ -361,7 +362,8 @@ public class MultiStageResponseHandler {
                                                                   ContextCollector.ConversationContext context,
                                                                   ContextSettings settings,
                                                                   LlmQueryTracker tracker,
-                                                                  int attempt) {
+                                                                  int attempt,
+                                                                  String botId) {
         String triggerText = rawText != null && !rawText.isBlank()
                 ? rawText
                 : (context != null && context.triggeringMessage() != null ? Optional.ofNullable(context.triggeringMessage().getContent()).orElse("") : "");
@@ -379,7 +381,7 @@ public class MultiStageResponseHandler {
         Long senderId = context != null && context.triggeringMessage() != null ? context.triggeringMessage().getSenderId() : null;
         return antiDetectionService.analyzeAndAdjustResponse(draft, senderId, messageContext)
                 .defaultIfEmpty(draft)
-                .flatMap(adjusted -> responseRefinerService.refineResponse(adjusted, triggerText, senderId)
+                .flatMap(adjusted -> responseRefinerService.refineResponse(adjusted, triggerText, senderId, botId)
                         .defaultIfEmpty(adjusted))
                 .flatMap(refined -> {
                     boolean hasAi = antiDetectionService.hasAiPatterns(refined);
