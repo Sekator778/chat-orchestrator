@@ -17,10 +17,12 @@ import java.time.Duration;
  * Persona-aware: new send(botId, ...) overloads use the persona's own TDLib client.
  * Backward-compatible: old send(chatId, ...) overloads delegate to the primary bot.
  *
- * <p>Outbound moderation is applied here (single choke point): every outbound text
- * passes {@link OutboundReplyGuard#shouldSuppress} regardless of originating path
- * (reactive reply, pending queue, proactive send, digest). Fail-closed: a guard
- * error suppresses the send and logs a warning.
+ * <p>Outbound moderation is applied here: text sent through this class passes
+ * {@link OutboundReplyGuard#shouldSuppress} first, fail-closed — a guard error
+ * suppresses the send and logs a warning. This is not the only door, though:
+ * the reactive reply path and the pending queue build their own SendMessage and
+ * call the client facade directly, so each applies the guard itself. Adding a
+ * new send path means adding the guard to it.
  */
 @Component
 public final class TelegramMessageSenderImpl implements TelegramMessageSender {
