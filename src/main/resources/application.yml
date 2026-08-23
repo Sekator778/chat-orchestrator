@@ -402,3 +402,29 @@ management:
     health:
       # Changed from when-authorized to always to allow frontend monitoring panel to access health status
       show-details: ${MANAGEMENT_HEALTH_DETAILS:always}
+      # Each readiness indicator can be switched off by property; with validation on,
+      # switching one off would make the whole application fail to start because the
+      # group references a contributor that no longer exists.
+      validate-group-membership: false
+      group:
+        # What a container HEALTHCHECK must watch: if one of these is down the
+        # process really is broken and restarting it is the right answer.
+        liveness:
+          include: ping,diskSpace,r2dbc
+          show-details: ${MANAGEMENT_HEALTH_DETAILS:always}
+        # Fail-open dependencies. Their loss degrades the product silently - no
+        # semantic ranking without Qdrant/TEI, no reply path at all without Kafka -
+        # but a restart fixes none of it, so they must never drive liveness.
+        readiness:
+          include: qdrant,embeddings,kafka
+          show-details: ${MANAGEMENT_HEALTH_DETAILS:always}
+  health:
+    qdrant:
+      enabled: ${MANAGEMENT_HEALTH_QDRANT_ENABLED:true}
+      timeout-ms: ${MANAGEMENT_HEALTH_QDRANT_TIMEOUT_MS:2000}
+    embeddings:
+      enabled: ${MANAGEMENT_HEALTH_EMBEDDINGS_ENABLED:true}
+      timeout-ms: ${MANAGEMENT_HEALTH_EMBEDDINGS_TIMEOUT_MS:2000}
+    kafka:
+      enabled: ${MANAGEMENT_HEALTH_KAFKA_ENABLED:true}
+      timeout-ms: ${MANAGEMENT_HEALTH_KAFKA_TIMEOUT_MS:2000}
