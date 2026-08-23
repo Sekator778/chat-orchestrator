@@ -67,14 +67,7 @@ public class PendingResponseCoordinator {
             return Mono.just(false);
         }
 
-        Instant eligibleAt;
-        if (delaySeconds > 0) {
-            long jitter = ThreadLocalRandom.current().nextLong(-(long)(delaySeconds * 0.50), (long)(delaySeconds * 0.50));
-            long botOffset = Math.abs(botInstanceId.hashCode() % (delaySeconds / 2));
-            eligibleAt = Instant.now().plusSeconds(delaySeconds + jitter + botOffset);
-        } else {
-            eligibleAt = Instant.now();
-        }
+        Instant eligibleAt = Instant.now().plusSeconds(delaySeconds + staggerSeconds(delaySeconds, botInstanceId));
 
         String responseLength = Optional.ofNullable(cfg.template())
                 .map(ResponseTemplate::getResponseStyle)
@@ -97,5 +90,29 @@ public class PendingResponseCoordinator {
                 .doOnError(err -> log.error("[Chat {}] Очередь: не удалось сохранить отложенный ответ: {}", chatId, err.getMessage(), err))
                 .map(p -> true)
                 .onErrorReturn(false);
+    }
+
+    /**
+     * Spread around the configured delay: a random jitter of up to half the delay
+     * either way, plus a per-persona offset so two personas queued on the same
+     * message do not surface in the same second.
+     * <p>
+     * Both terms are half the delay wide, which is zero for a one-second delay —
+     * and the arithmetic used to be written as if it never could be, so
+     * {@code pending_response_delay_seconds = 1} threw out of the middle of the
+     * reply pipeline and the reply was dropped. It is a plain window here, and a
+     * window of zero simply means no spread.
+     *
+     * @return seconds to add to the delay; never negative, never more than the delay
+     */
+    static long staggerSeconds(int delaySeconds, String botInstanceId) {
+        long half = Math.max(0, delaySeconds) / 2;
+        if (half <= 0) {
+            return 0;
+        }
+        long jitter = ThreadLocalRandom.current().nextLong(-half, half + 1);
+        // floorMod, not abs: hashCode can be Integer.MIN_VALUE, whose abs is still negative.
+        long botOffset = botInstanceId == null ? 0 : Math.floorMod(botInstanceId.hashCode(), half);
+        return jitter + botOffset;
     }
 }

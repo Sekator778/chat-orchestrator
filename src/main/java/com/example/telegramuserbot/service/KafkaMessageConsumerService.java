@@ -18,7 +18,9 @@ import com.example.telegramuserbot.service.orchestration.dto.ResponseDirectives;
 import com.example.telegramuserbot.service.persistence.MessagePersistenceService;
 import com.example.telegramuserbot.service.processing.IdempotencyService;
 import com.example.telegramuserbot.service.ratelimit.ResponseRateLimitGate;
+import com.example.telegramuserbot.service.safety.OutboundReplyGuard;
 import com.example.telegramuserbot.service.telegram.OwnAccountSenderFilter;
+import com.example.telegramuserbot.service.telegram.SendFailureClassifier;
 import com.example.telegramuserbot.telegram.TelegramClientFacade;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import it.tdlight.jni.TdApi;
@@ -75,6 +77,7 @@ public class KafkaMessageConsumerService {
 
     // Persona activity schedule: DM replies respect the same schedule window as group replies.
     private final PersonaScheduleService personaScheduleService;
+    private final OutboundReplyGuard outboundReplyGuard;
 
     @Value("${llm.persona-fanout.concurrency:4}")
     private int personaFanOutConcurrency;
@@ -117,7 +120,8 @@ public class KafkaMessageConsumerService {
                                        ConversationAnalysisService conversationAnalysisService,
                                        OwnAccountSenderFilter ownAccountSenderFilter,
                                        AppSettingsService appSettings,
-                                       PersonaScheduleService personaScheduleService) {
+                                       PersonaScheduleService personaScheduleService,
+                                       OutboundReplyGuard outboundReplyGuard) {
         this.telegramClientManager = telegramClientManager;
         this.objectMapper = objectMapper;
         this.messageRepository = messageRepository;
@@ -133,6 +137,7 @@ public class KafkaMessageConsumerService {
         this.ownAccountSenderFilter = ownAccountSenderFilter;
         this.appSettings = appSettings;
         this.personaScheduleService = personaScheduleService;
+        this.outboundReplyGuard = outboundReplyGuard;
     }
 
     @KafkaListener(topics = "${kafka.topic.incoming-messages}")
@@ -501,14 +506,22 @@ public class KafkaMessageConsumerService {
         }
         return sendTelegramReply(botId, originalMessageEntity.getChatId(), originalMessageEntity.getMessageId(), payload.content(), personaIndex, decidedDelaySeconds)
                 .onErrorResume(e -> {
-                    if (isTransientSendError(e)) {
-                        log.warn("[dispatch] transient send failure for chat={} — not marking problematic: {}",
-                                originalMessageEntity.getChatId(), extractMessage(e));
+                    if (!SendFailureClassifier.isPermanentAccessError(e)) {
+                        // Muting a chat is irreversible (there is no un-mark path), so it is
+                        // reserved for errors that actually name an access problem. Everything
+                        // else — flood waits, the kill switch, an unrecognized failure — costs
+                        // one message and is retried when the next one arrives.
+                        log.warn("[dispatch] non-permanent send failure for chat={} ({}) — not marking problematic: {}",
+                                originalMessageEntity.getChatId(),
+                                SendFailureClassifier.isTransientSendError(e) ? "known transient" : "unclassified",
+                                SendFailureClassifier.extractMessage(e));
                         return Mono.empty();
                     }
+                    log.warn("[dispatch] permanent access failure for chat={} — muting: {}",
+                            originalMessageEntity.getChatId(), SendFailureClassifier.extractMessage(e));
                     return problematicChatService.markProblematic(originalMessageEntity.getChatId(),
                                     ProblematicChatReason.ACCESS_DENIED,
-                                    e.getMessage())
+                                    SendFailureClassifier.extractMessage(e))
                             .onErrorResume(markError -> {
                                 log.warn("Failed to persist problematic chat {}: {}", originalMessageEntity.getChatId(), markError.getMessage(), markError);
                                 return Mono.empty();
@@ -530,24 +543,6 @@ public class KafkaMessageConsumerService {
                                                      String botId,
                                                      int personaIndex) {
         return dispatchOrchestratedResponse(originalMessageEntity, payload, botId, personaIndex, null);
-    }
-
-    /**
-     * Returns true for transient send errors that self-recover and must NOT permanently
-     * mute the chat via markProblematic.
-     * Walks the cause chain so wrapped IOExceptions are caught correctly.
-     */
-    private static boolean isTransientSendError(Throwable e) {
-        String msg = extractMessage(e);
-        return msg != null && (msg.contains("FLOOD_WAIT") || msg.contains("No telegram client"));
-    }
-
-    /** Extracts the most informative message from e, checking cause chain. */
-    private static String extractMessage(Throwable e) {
-        if (e == null) return null;
-        if (e.getMessage() != null) return e.getMessage();
-        if (e.getCause() != null && e.getCause().getMessage() != null) return e.getCause().getMessage();
-        return null;
     }
 
     private Mono<List<MessageEntity>> persistBotReplies(String botId, List<TdApi.Message> messages) {
@@ -574,8 +569,21 @@ public class KafkaMessageConsumerService {
             return Mono.empty();
         }
 
-        // Outbound moderation is now enforced centrally in TelegramMessageSenderImpl
-        // (single choke point) — no per-path guard needed here.
+        // The guard has to run here. TelegramMessageSenderImpl calls itself the single
+        // choke point, but this path never goes through it — it talks to the client
+        // facade directly, and so did every ordinary LLM reply.
+        try {
+            if (outboundReplyGuard.shouldSuppress(cleanedReplyText)) {
+                log.warn("⊘ OUTBOUND GUARD suppressed reply to chat={} msg={} botId={} — staying silent",
+                        chatId, originalMessageId, botId);
+                return Mono.empty();
+            }
+        } catch (Exception guardError) {
+            log.warn("⊘ OUTBOUND GUARD error (fail-closed) for chat={} botId={}: {}",
+                    chatId, botId, guardError.getMessage());
+            return Mono.empty();
+        }
+
         return showTypingIndicatorAndSendReply(botId, chatId, originalMessageId, cleanedReplyText, personaIndex, decidedDelaySeconds);
     }
 

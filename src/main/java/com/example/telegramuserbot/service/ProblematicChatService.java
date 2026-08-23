@@ -5,6 +5,7 @@ import com.example.telegramuserbot.domain.ProblematicChatReason;
 import com.example.telegramuserbot.repository.ProblematicChatRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Mono;
 
@@ -116,6 +117,23 @@ public class ProblematicChatService {
                 .subscribe();
     }
 
+    /**
+     * Muting a chat is written to the database and mirrored in memory, but nothing
+     * ever un-mutes one: the only recovery is deleting the row by hand. Without a
+     * periodic re-read that delete has no effect until the next restart, so an
+     * operator fixing a wrongly muted chat sees nothing happen. Re-reading the
+     * table costs one small query per interval.
+     */
+    @Scheduled(
+            fixedDelayString = "${bot.problematic-chats.refresh-ms:300000}",
+            initialDelayString = "${bot.problematic-chats.initial-delay-ms:300000}")
+    void refreshCachePeriodically() {
+        refreshCache()
+                .doOnError(e -> log.warn("Scheduled problematic-chat cache refresh failed: {}", e.getMessage()))
+                .onErrorComplete()
+                .subscribe();
+    }
+
     private Mono<Void> refreshCache() {
         return repository.findAll()
                 .map(ProblematicChat::getChannelChatId)
@@ -123,7 +141,7 @@ public class ProblematicChatService {
                 .doOnNext(ids -> {
                     cachedProblematicChats.clear();
                     cachedProblematicChats.addAll(ids);
-                    log.info("Refreshed problematic chat cache, {} entries", cachedProblematicChats.size());
+                    log.debug("Refreshed problematic chat cache, {} entries", cachedProblematicChats.size());
                 })
                 .doOnError(e -> log.warn("Failed to refresh problematic chat cache: {}", e.getMessage()))
                 .then();

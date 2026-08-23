@@ -107,23 +107,35 @@ public class PersonaServiceImpl implements PersonaService {
         throw new IllegalStateException("Persona file not found for instance: " + instance);
     }
 
+    /**
+     * The persona that is about to speak, not the one that happened to be loaded
+     * at startup. {@code personaData} is a single field on a singleton, chosen
+     * once from the primary instance id — reading it to answer for a persona
+     * that is not the primary puts the wrong name in the wrong chat.
+     */
+    private Map<String, Object> personaFor(String botId) {
+        return resolvePersonaMapForBot(botId, "base");
+    }
+
     @Override
-    public String getBotName() {
-        if (personaData != null && personaData.get("name") instanceof String name && !name.isBlank()) {
+    public String getBotName(String botId) {
+        Map<String, Object> persona = personaFor(botId);
+        if (persona != null && persona.get("name") instanceof String name && !name.isBlank()) {
             return name;
         }
-        Map<String, Object> personal = getPersonal();
+        Map<String, Object> personal = getSection(persona, "personal");
         return personal != null ? (String) personal.get("name") : "Ассистент";
     }
 
     @Override
-    public String getBotIdentity() {
-        if (personaData != null && personaData.get("name") instanceof String name) {
-            String descr = personaData.get("description") instanceof String d ? d : "";
+    public String getBotIdentity(String botId) {
+        Map<String, Object> persona = personaFor(botId);
+        if (persona != null && persona.get("name") instanceof String name) {
+            String descr = persona.get("description") instanceof String d ? d : "";
             return descr.isBlank() ? name : name + " — " + descr;
         }
-        Map<String, Object> personal = getPersonal();
-        Map<String, Object> profession = getProfession();
+        Map<String, Object> personal = getSection(persona, "personal");
+        Map<String, Object> profession = getSection(persona, "profession");
         
         if (personal == null || profession == null) {
             return "Ассистент, IT-специалист";
@@ -137,8 +149,8 @@ public class PersonaServiceImpl implements PersonaService {
     }
 
     @Override
-    public String getAboutSelfResponse() {
-        List<String> responses = getTypicalResponses("about_self");
+    public String getAboutSelfResponse(String botId) {
+        List<String> responses = getTypicalResponses(personaFor(botId), "about_self");
         if (responses != null && !responses.isEmpty()) {
             return responses.get(random.nextInt(responses.size()));
         }
@@ -146,8 +158,8 @@ public class PersonaServiceImpl implements PersonaService {
     }
 
     @Override
-    public String getPhotoRefusalResponse() {
-        List<String> responses = getTypicalResponses("photo_requests");
+    public String getPhotoRefusalResponse(String botId) {
+        List<String> responses = getTypicalResponses(personaFor(botId), "photo_requests");
         if (responses != null && !responses.isEmpty()) {
             return responses.get(random.nextInt(responses.size()));
         }
@@ -155,8 +167,8 @@ public class PersonaServiceImpl implements PersonaService {
     }
 
     @Override
-    public String getCapabilitiesResponse() {
-        List<String> responses = getTypicalResponses("capabilities");
+    public String getCapabilitiesResponse(String botId) {
+        List<String> responses = getTypicalResponses(personaFor(botId), "capabilities");
         if (responses != null && !responses.isEmpty()) {
             return responses.get(random.nextInt(responses.size()));
         }
@@ -173,7 +185,7 @@ public class PersonaServiceImpl implements PersonaService {
     }
 
     @Override
-    public String getPersonaResponse(String userQuestion) {
+    public String getPersonaResponse(String userQuestion, String botId) {
         if (userQuestion == null || userQuestion.isBlank()) {
             return null;
         }
@@ -181,23 +193,23 @@ public class PersonaServiceImpl implements PersonaService {
         String normalized = userQuestion.toLowerCase(Locale.ROOT);
 
         if (isAboutSelfQuestion(normalized)) {
-            return getAboutSelfResponse();
+            return getAboutSelfResponse(botId);
         }
 
         if (isPhotoRequest(normalized)) {
-            return getPhotoRefusalResponse();
+            return getPhotoRefusalResponse(botId);
         }
 
         if (isCapabilitiesQuestion(normalized)) {
-            return getCapabilitiesResponse();
+            return getCapabilitiesResponse(botId);
         }
 
         if (isBotDetectionQuestion(normalized)) {
-            List<String> botDenials = getTypicalResponses("bot_denial");
+            List<String> botDenials = getTypicalResponses(personaFor(botId), "bot_denial");
             if (botDenials != null && !botDenials.isEmpty()) {
                 return botDenials.get(random.nextInt(botDenials.size()));
             }
-            return String.format("Я %s, обычный человек, просто люблю помогать и общаться.", getBotName());
+            return String.format("Я %s, обычный человек, просто люблю помогать и общаться.", getBotName(botId));
         }
 
         return null;
@@ -335,12 +347,17 @@ public class PersonaServiceImpl implements PersonaService {
     }
 
     private Map<String, Object> getSection(String key) {
-        if (personaData == null) return null;
-        Object direct = personaData.get(key);
+        return getSection(personaData, key);
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> getSection(Map<String, Object> persona, String key) {
+        if (persona == null) return null;
+        Object direct = persona.get(key);
         if (direct instanceof Map<?, ?> map) {
             return new HashMap<>((Map<String, Object>) map);
         }
-        Map<String, Object> metadata = getMetadata();
+        Map<String, Object> metadata = getMetadata(persona);
         Object metaSection = metadata.get(key);
         if (metaSection instanceof Map<?, ?> map) {
             return new HashMap<>((Map<String, Object>) map);
@@ -366,10 +383,10 @@ public class PersonaServiceImpl implements PersonaService {
         return List.of();
     }
 
-    private List<String> getTypicalResponses(String key) {
-        if (personaData == null || key == null || key.isBlank()) return null;
-        Map<String, Object> metadata = getMetadata();
-        Object direct = personaData.get("typical_responses");
+    private List<String> getTypicalResponses(Map<String, Object> persona, String key) {
+        if (persona == null || key == null || key.isBlank()) return null;
+        Map<String, Object> metadata = getMetadata(persona);
+        Object direct = persona.get("typical_responses");
         if (direct instanceof Map<?, ?> map && map.containsKey(key)) {
             return toStringList(map.get(key));
         }
@@ -380,16 +397,20 @@ public class PersonaServiceImpl implements PersonaService {
         return null;
     }
 
-    @SuppressWarnings("unchecked")
     private Map<String, Object> getMetadata() {
-        if (personaData == null) return Map.of();
-        Object metadata = personaData.get("metadata");
+        return getMetadata(personaData);
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> getMetadata(Map<String, Object> persona) {
+        if (persona == null) return Map.of();
+        Object metadata = persona.get("metadata");
         if (metadata instanceof Map<?, ?> map) {
             return (Map<String, Object>) map;
         }
         if (metadata instanceof String s && !s.isBlank()) {
             Map<String, Object> parsed = parseMetadata(s);
-            personaData.put("metadata", parsed);
+            persona.put("metadata", parsed);
             return parsed;
         }
         return Map.of();
