@@ -274,3 +274,8 @@ databaseChangeLog:
   # Per-day coin-flip probability for proactive own-news posting (cs082)
   - include:
       file: db/changelog/changes/082-seed-daily-post-probability.yaml
+
+  # Restore the partial predicates Liquibase silently dropped from the
+  # tdlib_operations indexes, which froze MESSAGE_SYNC/CHAT_DISCOVERY (cs083)
+  - include:
+      file: db/changelog/changes/083-tdlib-operations-partial-indexes.yaml

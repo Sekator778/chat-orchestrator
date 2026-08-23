@@ -80,6 +80,14 @@ APP_PID_FILE="$PROJECT_ROOT/.pids/app.pid"
 APP_JAR_FILE="$PROJECT_ROOT/.pids/app.jar"
 JAVA_REQUIRED=21
 
+# TDLight auth state. The reply persona runs with messageDb=false fileDb=false, so
+# its whole login lives in one td.binlog - a SIGKILL mid-write reinitialises it and
+# the account has to be re-logged in by phone code. app_stop clones this directory
+# before it touches the process; see snapshot_sessions.
+ORCH_SESSIONS_DIR="${ORCH_SESSIONS_DIR:-$HOME/chat-orchestrator-staging/sessions}"
+ORCH_SESSIONS_SNAPSHOTS="${ORCH_SESSIONS_SNAPSHOTS:-$HOME/chat-orchestrator-staging/sessions-snapshots}"
+ORCH_SESSIONS_KEEP="${ORCH_SESSIONS_KEEP:-10}"
+
 log()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m!!\033[0m %s\n' "$*"; }
 
@@ -465,6 +473,27 @@ app_start() {
   return 1
 }
 
+# An APFS clone of the TDLight sessions - instant and free, the blocks are shared
+# until something writes. Returns non-zero if no usable snapshot could be made,
+# which is app_stop's cue not to escalate to SIGKILL.
+snapshot_sessions() {
+  [ -d "$ORCH_SESSIONS_DIR" ] || return 1
+  local dest
+  dest="$ORCH_SESSIONS_SNAPSHOTS/$(date -u +%Y%m%d-%H%M%SZ)"
+  mkdir -p "$ORCH_SESSIONS_SNAPSHOTS" || return 1
+  # Two stops inside one second would otherwise copy the tree *into* the first
+  # snapshot instead of beside it.
+  [ -e "$dest" ] && dest="$dest-$$"
+  cp -Rc "$ORCH_SESSIONS_DIR" "$dest" 2>/dev/null ||
+    cp -R "$ORCH_SESSIONS_DIR" "$dest" 2>/dev/null || return 1
+  find "$dest" -name td.binlog | grep -q . || { rm -rf "$dest"; return 1; }
+  log "sessions snapshot -> $dest"
+  # shellcheck disable=SC2012 # names are timestamps, no odd characters
+  ls -1d "$ORCH_SESSIONS_SNAPSHOTS"/*/ 2>/dev/null |
+    sort -r | tail -n "+$((ORCH_SESSIONS_KEEP + 1))" |
+    while read -r old; do rm -rf "$old"; done
+}
+
 app_stop() {
   local pid
   if ! pid="$(app_pid)"; then
@@ -472,13 +501,23 @@ app_stop() {
     rm -f "$APP_PID_FILE" "$APP_JAR_FILE"
     return 0
   fi
+  local snapshotted=0
+  snapshot_sessions && snapshotted=1
   log "stopping the app (PID $pid)"
   kill "$pid" 2>/dev/null || true
-  for _ in $(seq 15); do
+  # 45s, not 15s: under load the app has been seen to need most of that to flush
+  # TDLib state, and the old 15s window is what pushed stops into SIGKILL.
+  for _ in $(seq 45); do
     ps -p "$pid" >/dev/null 2>&1 || { rm -f "$APP_PID_FILE" "$APP_JAR_FILE"; log "the app stopped"; return 0; }
     sleep 1
   done
-  warn "the app ignored SIGTERM - sending SIGKILL"
+  if [ "$snapshotted" = 0 ]; then
+    warn "the app ignored SIGTERM and the TDLight sessions could not be snapshotted"
+    warn "NOT sending SIGKILL - it would risk the reply-persona login (see docs/atlas/)"
+    warn "shed load first (disable heavy jobs, POST /api/admin/cache/refresh), then retry"
+    return 1
+  fi
+  warn "the app ignored SIGTERM for 45s - sending SIGKILL (sessions are snapshotted)"
   kill -9 "$pid" 2>/dev/null || true
   sleep 1
   rm -f "$APP_PID_FILE" "$APP_JAR_FILE"
@@ -499,7 +538,7 @@ cmd_app() {
     start)   shift; app_start ${1+"$@"} ;;
     stop)    app_stop ;;
     status)  app_status ;;
-    restart) shift; app_stop; sleep 2; app_start ${1+"$@"} ;;
+    restart) shift; app_stop || return 1; sleep 2; app_start ${1+"$@"} ;;
     *)       warn "usage: orchstack.sh app [start [--no-update|--build|--jar PATH]|stop|status|restart]"; return 1 ;;
   esac
 }
