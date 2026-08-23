@@ -509,30 +509,58 @@ public class ProactiveNewsPostingService {
 
         MessageEntity best = null;
         double bestBlend = Double.NEGATIVE_INFINITY;
-        boolean bestWasCosine = false;
+        boolean bestHadVector = false;
+        double bestCosine = 0.0;
 
         for (MessageEntity msg : candidates) {
             double value  = computeValueScore(msg);
-            double cosine = cosineById.getOrDefault(msg.getId(), 0.0);
+            // Absent from the map means the item has no vector in Qdrant at all; that is a
+            // different story from a vector that scored badly, and the log has to tell them
+            // apart - one is a pipeline gap, the other is a ranking outcome.
+            Double scored = cosineById.get(msg.getId());
+            double cosine = scored != null ? scored : 0.0;
             // Blend: value_score × max(0, cosineBase + cosine)
             // cosineBase ensures value still contributes even when cosine = 0.
             // Clamp to ≥0 so a negative cosine (very off-topic, cosine ∈ [-1,1]) cannot invert
             // the ranking — value_score remains a true floor, not a multiplier on a negative.
             double blend  = value * Math.max(0.0, cosineBase + cosine);
             if (blend > bestBlend) {
-                bestBlend    = blend;
-                best         = msg;
-                bestWasCosine = (cosine > 0.0);
+                bestBlend     = blend;
+                best          = msg;
+                bestHadVector = scored != null;
+                bestCosine    = cosine;
             }
         }
 
         if (best != null) {
-            String driver = bestWasCosine ? "cosine+value" : "value-only (no vector)";
             log.info("[ProactiveNews] Persona id={} botId={} selected msg id={} blend={} driver={}",
-                    personaId, botIdStr, best.getId(), String.format("%.4f", bestBlend), driver);
+                    personaId, botIdStr, best.getId(), String.format("%.4f", bestBlend),
+                    describeSelectionDriver(bestHadVector, bestCosine));
         }
         // Safe: candidates is non-empty (caller guards), so best != null.
         return best != null ? best : candidates.get(0);
+    }
+
+    /**
+     * Explains why the winner won, for the selection log.
+     *
+     * <p>The label used to read "value-only (no vector)" for every winner whose cosine was
+     * not positive, which quietly conflated two different situations: an item that has no
+     * embedding in Qdrant (the embedding pipeline never got to it) and an item that is
+     * embedded but off-topic for this persona. Chasing the first when the log actually
+     * described the second wastes a debugging session.
+     *
+     * @param hadVector whether Qdrant returned a score for the winning item at all
+     * @param cosine    that score, or 0 when there was none
+     */
+    static String describeSelectionDriver(boolean hadVector, double cosine) {
+        if (!hadVector) {
+            return "value-only (no vector)";
+        }
+        if (cosine > 0.0) {
+            return "cosine+value";
+        }
+        return String.format("value-only (off-topic vector, cosine=%.4f)", cosine);
     }
 
     /**
