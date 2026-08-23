@@ -18,6 +18,7 @@ import com.example.telegramuserbot.service.orchestration.dto.ResponseDirectives;
 import com.example.telegramuserbot.service.persistence.MessagePersistenceService;
 import com.example.telegramuserbot.service.processing.IdempotencyService;
 import com.example.telegramuserbot.service.ratelimit.ResponseRateLimitGate;
+import com.example.telegramuserbot.service.safety.OutboundReplyGuard;
 import com.example.telegramuserbot.service.telegram.OwnAccountSenderFilter;
 import com.example.telegramuserbot.telegram.TelegramClientFacade;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -75,6 +76,7 @@ public class KafkaMessageConsumerService {
 
     // Persona activity schedule: DM replies respect the same schedule window as group replies.
     private final PersonaScheduleService personaScheduleService;
+    private final OutboundReplyGuard outboundReplyGuard;
 
     @Value("${llm.persona-fanout.concurrency:4}")
     private int personaFanOutConcurrency;
@@ -117,7 +119,8 @@ public class KafkaMessageConsumerService {
                                        ConversationAnalysisService conversationAnalysisService,
                                        OwnAccountSenderFilter ownAccountSenderFilter,
                                        AppSettingsService appSettings,
-                                       PersonaScheduleService personaScheduleService) {
+                                       PersonaScheduleService personaScheduleService,
+                                       OutboundReplyGuard outboundReplyGuard) {
         this.telegramClientManager = telegramClientManager;
         this.objectMapper = objectMapper;
         this.messageRepository = messageRepository;
@@ -133,6 +136,7 @@ public class KafkaMessageConsumerService {
         this.ownAccountSenderFilter = ownAccountSenderFilter;
         this.appSettings = appSettings;
         this.personaScheduleService = personaScheduleService;
+        this.outboundReplyGuard = outboundReplyGuard;
     }
 
     @KafkaListener(topics = "${kafka.topic.incoming-messages}")
@@ -574,8 +578,21 @@ public class KafkaMessageConsumerService {
             return Mono.empty();
         }
 
-        // Outbound moderation is now enforced centrally in TelegramMessageSenderImpl
-        // (single choke point) — no per-path guard needed here.
+        // The guard has to run here. TelegramMessageSenderImpl calls itself the single
+        // choke point, but this path never goes through it — it talks to the client
+        // facade directly, and so did every ordinary LLM reply.
+        try {
+            if (outboundReplyGuard.shouldSuppress(cleanedReplyText)) {
+                log.warn("⊘ OUTBOUND GUARD suppressed reply to chat={} msg={} botId={} — staying silent",
+                        chatId, originalMessageId, botId);
+                return Mono.empty();
+            }
+        } catch (Exception guardError) {
+            log.warn("⊘ OUTBOUND GUARD error (fail-closed) for chat={} botId={}: {}",
+                    chatId, botId, guardError.getMessage());
+            return Mono.empty();
+        }
+
         return showTypingIndicatorAndSendReply(botId, chatId, originalMessageId, cleanedReplyText, personaIndex, decidedDelaySeconds);
     }
 
