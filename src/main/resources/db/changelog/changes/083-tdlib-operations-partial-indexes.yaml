@@ -1,0 +1,25 @@
+databaseChangeLog:
+  - changeSet:
+      id: 083-tdlib-operations-partial-indexes
+      author: claude
+      comment: >-
+        Recreate uq_tdlib_operations_active_type and idx_tdlib_operations_timeout
+        as the partial indexes 046 meant to create (cs083). Liquibase's createIndex
+        has no `where` attribute, so the `where: "status = 'IN_PROGRESS'"` on both
+        changes was accepted and silently dropped - both indexes exist without a
+        predicate. A non-partial unique index still satisfies the inference of
+        `ON CONFLICT (operation_type, bot_instance_id) WHERE status = 'IN_PROGRESS'`,
+        so tryAcquireLock() conflicted against rows of ANY status: the first
+        COMPLETED row for a (type, instance) pair made that lock permanently
+        unacquirable, and the empty RETURNING was reported as "another operation is
+        in progress". MESSAGE_SYNC and CHAT_DISCOVERY therefore ran once per bot
+        instance and then stayed dead until deleteOldOperations() removed the row
+        24 h later. Verified on the atlas stand: with the predicate restored the
+        lock is acquired past a COMPLETED row and a second IN_PROGRESS is still
+        refused.
+      changes:
+        - sqlFile:
+            path: ../sql/083-tdlib-operations-partial-indexes.sql
+            relativeToChangelogFile: true
+            splitStatements: true
+            stripComments: false
