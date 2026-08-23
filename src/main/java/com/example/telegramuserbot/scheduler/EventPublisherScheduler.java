@@ -8,6 +8,8 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import java.util.concurrent.atomic.AtomicBoolean;
+
 import java.time.LocalDateTime;
 
 /**
@@ -21,6 +23,9 @@ import java.time.LocalDateTime;
 public final class EventPublisherScheduler {
 
     private static final Logger log = LoggerFactory.getLogger(EventPublisherScheduler.class);
+
+    /** One cycle at a time: fixedDelay alone cannot serialize a fire-and-forget subscribe. */
+    private final AtomicBoolean running = new AtomicBoolean(false);
 
     private final EventPublisherService publisher;
     private final PostedRepository posted;
@@ -38,14 +43,22 @@ public final class EventPublisherScheduler {
 
     /**
      * Publishes ready events to Telegram chats.
-     * Runs every 5 seconds to poll for events matching subscriptions.
-     * Events are transitioned from 'ready' → 'published' status.
+     * <p>
+     * fixedDelay, not fixedRate: the cycle is subscribed and returns immediately, so
+     * a rate-based trigger would start the next one while this one is still sending.
+     * The guard covers the rest - a cycle slower than the delay no longer overlaps
+     * itself, which with a non-CAS status write meant publishing an event twice.
      */
-    @Scheduled(fixedRateString = "${events.publisher.poll-interval-ms:5000}")
+    @Scheduled(fixedDelayString = "${events.publisher.poll-interval-ms:5000}")
     public void publishEvents() {
+        if (!running.compareAndSet(false, true)) {
+            log.debug("Previous publisher cycle still running - skipping this tick");
+            return;
+        }
         log.debug("Starting scheduled event publisher cycle");
 
         publisher.process()
+            .doFinally(signal -> running.set(false))
             .subscribe(
                 postsPublished -> {
                     if (postsPublished > 0) {

@@ -7,6 +7,8 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import java.util.concurrent.atomic.AtomicBoolean;
+
 /**
  * Scheduler for automatic event processing from tgscan.events table.
  * Polls for new events and transitions them through their lifecycle.
@@ -17,6 +19,9 @@ import org.springframework.stereotype.Component;
 public final class EventWatcherScheduler {
 
     private static final Logger log = LoggerFactory.getLogger(EventWatcherScheduler.class);
+
+    /** One cycle at a time: fixedDelay alone cannot serialize a fire-and-forget subscribe. */
+    private final AtomicBoolean running = new AtomicBoolean(false);
 
     private final EventWatcherService watcher;
 
@@ -31,14 +36,21 @@ public final class EventWatcherScheduler {
 
     /**
      * Processes new events from the events table.
-     * Runs every 30 seconds to poll for events meeting threshold criteria.
+     * <p>
+     * fixedDelay plus a re-entrancy guard, for the same reason as the publisher:
+     * the cycle is fire-and-forget, so nothing else keeps two of them apart.
      * Events are transitioned from 'new' → 'ready' status and logged.
      */
-    @Scheduled(fixedRateString = "${events.watcher.poll-interval-ms:30000}")
+    @Scheduled(fixedDelayString = "${events.watcher.poll-interval-ms:30000}")
     public void processEvents() {
+        if (!running.compareAndSet(false, true)) {
+            log.debug("Previous watcher cycle still running - skipping this tick");
+            return;
+        }
         log.debug("Starting scheduled event watcher cycle");
 
         watcher.process()
+            .doFinally(signal -> running.set(false))
             .subscribe(
                 eventsProcessed -> {
                     if (eventsProcessed > 0) {
