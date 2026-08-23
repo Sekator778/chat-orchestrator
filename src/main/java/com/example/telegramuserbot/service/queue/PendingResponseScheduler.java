@@ -3,6 +3,7 @@ package com.example.telegramuserbot.service.queue;
 import com.example.telegramuserbot.domain.PendingResponse;
 import com.example.telegramuserbot.service.TelegramClientManager;
 import com.example.telegramuserbot.service.persistence.MessagePersistenceService;
+import com.example.telegramuserbot.service.safety.OutboundReplyGuard;
 import com.example.telegramuserbot.telegram.TelegramClientFacade;
 import it.tdlight.jni.TdApi;
 import org.slf4j.Logger;
@@ -42,6 +43,7 @@ public final class PendingResponseScheduler {
     private final PendingResponseService pendingResponseService;
     private final TelegramClientManager telegramClientManager;
     private final MessagePersistenceService messagePersistenceService;
+    private final OutboundReplyGuard outboundReplyGuard;
 
     @Value("${pending-response.scheduler.send-concurrency:8}")
     private int sendConcurrency;
@@ -54,11 +56,13 @@ public final class PendingResponseScheduler {
     public PendingResponseScheduler(
             PendingResponseService pendingResponseService,
             TelegramClientManager telegramClientManager,
-            MessagePersistenceService messagePersistenceService
+            MessagePersistenceService messagePersistenceService,
+            OutboundReplyGuard outboundReplyGuard
     ) {
         this.pendingResponseService = pendingResponseService;
         this.telegramClientManager = telegramClientManager;
         this.messagePersistenceService = messagePersistenceService;
+        this.outboundReplyGuard = outboundReplyGuard;
     }
 
     /**
@@ -133,6 +137,18 @@ public final class PendingResponseScheduler {
 
     private Mono<TdApi.Message> sendReply(TelegramClientFacade client, Long chatId, Long replyToMessageId, String text) {
         if (text == null || text.isBlank()) {
+            return Mono.empty();
+        }
+        // A queued reply was generated minutes ago and never passed outbound moderation:
+        // this path talks to the client facade directly, bypassing TelegramMessageSenderImpl
+        // where the guard lives.
+        try {
+            if (outboundReplyGuard.shouldSuppress(text)) {
+                log.warn("⊘ OUTBOUND GUARD suppressed pending reply to chat={} — staying silent", chatId);
+                return Mono.empty();
+            }
+        } catch (Exception guardError) {
+            log.warn("⊘ OUTBOUND GUARD error (fail-closed) for chat={}: {}", chatId, guardError.getMessage());
             return Mono.empty();
         }
         return Mono.<TdApi.Message>create(sink -> {
