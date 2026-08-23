@@ -164,63 +164,6 @@ public class PersonaServiceImpl implements PersonaService {
     }
 
     @Override
-    public String buildPersonaSystemPrompt(String basePrompt) {
-        return buildPersonaSystemPrompt(basePrompt, null);
-    }
-
-    @Override
-    public String buildPersonaSystemPrompt(String basePrompt, String languageHint) {
-        if (languageHint != null && !languageHint.isBlank()) {
-            loadPersonaForLanguage(languageHint.trim().toLowerCase());
-        }
-        String identity = getBotIdentity();
-        Map<String, Object> background = getBackground();
-        Map<String, Object> personality = getPersonality();
-        List<String> limitations = getLimitations();
-        String description = personaData != null && personaData.get("description") instanceof String d ? d : null;
-        List<String> behavior = personaData != null && personaData.get("behavior") instanceof List<?> b
-                ? (List<String>) b
-                : null;
-
-        StringBuilder prompt = new StringBuilder();
-
-        if (description != null && !description.isBlank()) {
-            prompt.append(description).append(" ");
-        } else {
-            prompt.append(String.format("Ты %s из %s. ",
-                    identity,
-                    background != null ? background.get("location") : "России"));
-        }
-
-        if (personality != null) {
-            List<String> traits = (List<String>) personality.get("traits");
-            if (traits != null && !traits.isEmpty()) {
-                prompt.append("Твои личные черты: ")
-                        .append(String.join(", ", traits))
-                        .append(". ");
-            }
-        }
-
-        if (behavior != null && !behavior.isEmpty()) {
-            prompt.append("Поведение: ").append(String.join(" ", behavior)).append(" ");
-        }
-
-        if (limitations != null && !limitations.isEmpty()) {
-            prompt.append("Помни: ").append(String.join(", ", limitations)).append(". ");
-        }
-
-        prompt.append("ВАЖНО: ты обычный живой человек со своей жизнью и опытом. ")
-                .append("НИКОГДА не упоминай ботов, AI, искусственный интеллект или программы. ")
-                .append("Если спросят, кто ты, расскажи о себе как об обычном ").append(getBotName()).append(". ");
-
-        if (basePrompt != null && !basePrompt.isBlank()) {
-            prompt.append("\n\n").append(basePrompt);
-        }
-
-        return prompt.toString();
-    }
-
-    @Override
     public String buildPersonaSystemPrompt(String basePrompt, String languageHint, String botId) {
         String effectiveBotId = botId != null && !botId.isBlank() ? botId.trim() : botInstanceProvider.getInstanceId();
         String lang = languageHint != null && !languageHint.isBlank() ? languageHint.trim().toLowerCase() : "base";
@@ -450,41 +393,6 @@ public class PersonaServiceImpl implements PersonaService {
             return parsed;
         }
         return Map.of();
-    }
-
-    private void loadPersonaForLanguage(String lang) {
-        if (lang == null || lang.isBlank()) return;
-        String botId = botInstanceProvider.getInstanceId();
-        String cacheKey = botId + "|" + lang;
-        if (localeCache.containsKey(cacheKey)) {
-            this.personaData = localeCache.get(cacheKey);
-            return;
-        }
-        var cached = botPersonaCache.get(botId, lang);
-        if (cached.isPresent()) {
-            Map<String, Object> map = mapFromEntity(cached.get());
-            localeCache.put(cacheKey, map);
-            this.personaData = map;
-            return;
-        }
-        try {
-            BotPersona persona = botPersonaRepository.findByBotIdAndLanguage(botId, lang).block();
-            if (persona != null) {
-                Map<String, Object> map = mapFromEntity(persona);
-                localeCache.put(cacheKey, map);
-                this.personaData = map;
-                return;
-            }
-        } catch (Exception e) {
-            log.warn("Failed to load persona for bot {} lang {} from repository: {}", botId, lang, e.getMessage());
-        }
-        Map<String, Object> fallback = loadPersonaFromResourceFallback(botId, lang);
-        if (fallback != null) {
-            localeCache.put(cacheKey, fallback);
-            this.personaData = fallback;
-            return;
-        }
-        throw new IllegalStateException("Persona not found for lang " + lang + " and bot " + botId);
     }
 
     /**
