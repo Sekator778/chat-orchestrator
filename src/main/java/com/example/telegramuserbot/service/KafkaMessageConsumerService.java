@@ -19,6 +19,7 @@ import com.example.telegramuserbot.service.persistence.MessagePersistenceService
 import com.example.telegramuserbot.service.processing.IdempotencyService;
 import com.example.telegramuserbot.service.ratelimit.ResponseRateLimitGate;
 import com.example.telegramuserbot.service.telegram.OwnAccountSenderFilter;
+import com.example.telegramuserbot.service.telegram.SendFailureClassifier;
 import com.example.telegramuserbot.telegram.TelegramClientFacade;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import it.tdlight.jni.TdApi;
@@ -501,14 +502,22 @@ public class KafkaMessageConsumerService {
         }
         return sendTelegramReply(botId, originalMessageEntity.getChatId(), originalMessageEntity.getMessageId(), payload.content(), personaIndex, decidedDelaySeconds)
                 .onErrorResume(e -> {
-                    if (isTransientSendError(e)) {
-                        log.warn("[dispatch] transient send failure for chat={} — not marking problematic: {}",
-                                originalMessageEntity.getChatId(), extractMessage(e));
+                    if (!SendFailureClassifier.isPermanentAccessError(e)) {
+                        // Muting a chat is irreversible (there is no un-mark path), so it is
+                        // reserved for errors that actually name an access problem. Everything
+                        // else — flood waits, the kill switch, an unrecognized failure — costs
+                        // one message and is retried when the next one arrives.
+                        log.warn("[dispatch] non-permanent send failure for chat={} ({}) — not marking problematic: {}",
+                                originalMessageEntity.getChatId(),
+                                SendFailureClassifier.isTransientSendError(e) ? "known transient" : "unclassified",
+                                SendFailureClassifier.extractMessage(e));
                         return Mono.empty();
                     }
+                    log.warn("[dispatch] permanent access failure for chat={} — muting: {}",
+                            originalMessageEntity.getChatId(), SendFailureClassifier.extractMessage(e));
                     return problematicChatService.markProblematic(originalMessageEntity.getChatId(),
                                     ProblematicChatReason.ACCESS_DENIED,
-                                    e.getMessage())
+                                    SendFailureClassifier.extractMessage(e))
                             .onErrorResume(markError -> {
                                 log.warn("Failed to persist problematic chat {}: {}", originalMessageEntity.getChatId(), markError.getMessage(), markError);
                                 return Mono.empty();
@@ -530,24 +539,6 @@ public class KafkaMessageConsumerService {
                                                      String botId,
                                                      int personaIndex) {
         return dispatchOrchestratedResponse(originalMessageEntity, payload, botId, personaIndex, null);
-    }
-
-    /**
-     * Returns true for transient send errors that self-recover and must NOT permanently
-     * mute the chat via markProblematic.
-     * Walks the cause chain so wrapped IOExceptions are caught correctly.
-     */
-    private static boolean isTransientSendError(Throwable e) {
-        String msg = extractMessage(e);
-        return msg != null && (msg.contains("FLOOD_WAIT") || msg.contains("No telegram client"));
-    }
-
-    /** Extracts the most informative message from e, checking cause chain. */
-    private static String extractMessage(Throwable e) {
-        if (e == null) return null;
-        if (e.getMessage() != null) return e.getMessage();
-        if (e.getCause() != null && e.getCause().getMessage() != null) return e.getCause().getMessage();
-        return null;
     }
 
     private Mono<List<MessageEntity>> persistBotReplies(String botId, List<TdApi.Message> messages) {
