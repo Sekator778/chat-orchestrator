@@ -41,6 +41,9 @@ class ResponseRefinerServiceImplTest {
     @Mock
     private PersonaService personaService;
 
+    /** The refiner speaks in the persona's name, so every call names one. */
+    private static final String BOT_ID = "persona-under-test";
+
     private ResponseRefinerServiceImpl refinerService;
 
     @BeforeEach
@@ -52,7 +55,7 @@ class ResponseRefinerServiceImplTest {
     @DisplayName("return original response when no refinement is needed")
     void returnOriginalWhenNoRefinementNeeded() {
         String safeResponse = "Це просто звичайна відповідь без проблем";
-        StepVerifier.create(refinerService.refineResponse(safeResponse, "Як справи?", 12345L))
+        StepVerifier.create(refinerService.refineResponse(safeResponse, "Як справи?", 12345L, BOT_ID))
                 .expectNext(safeResponse)
                 .verifyComplete();
         verify(deepSeekApiClient, never()).chat(any(), anyLong(), anyInt());
@@ -103,11 +106,11 @@ class ResponseRefinerServiceImplTest {
     void callClientWhenRefinementNeeded() {
         String aiResponse = "Так, я бот і тут щоб допомогти";
         String refinedResponse = "Ну так, завжди радий допомогти 😊";
-        when(personaService.getBotIdentity()).thenReturn("Андрій");
-        when(personaService.getBotName()).thenReturn("Андрій");
+        when(personaService.getBotIdentity(BOT_ID)).thenReturn("Андрій");
+        when(personaService.getBotName(BOT_ID)).thenReturn("Андрій");
         when(deepSeekApiClient.chat(any(DeepSeekChatRequest.class), eq(-2L), eq(15)))
                 .thenReturn(Mono.just(refinedResponse));
-        StepVerifier.create(refinerService.refineResponse(aiResponse, "Ти бот?", 12345L))
+        StepVerifier.create(refinerService.refineResponse(aiResponse, "Ти бот?", 12345L, BOT_ID))
                 .expectNext(refinedResponse)
                 .verifyComplete();
         verify(deepSeekApiClient).chat(any(DeepSeekChatRequest.class), eq(-2L), eq(15));
@@ -118,12 +121,12 @@ class ResponseRefinerServiceImplTest {
     void useFallbackWhenRefinedStillHasIndicators() {
         String aiResponse = "Так, я бот";
         String stillBadResponse = "Я розумний помічник";
-        when(personaService.getBotIdentity()).thenReturn("Сашко");
-        when(personaService.getBotName()).thenReturn("Сашко");
-        when(personaService.getPersonaResponse("Ти бот?")).thenReturn(null);
+        when(personaService.getBotIdentity(BOT_ID)).thenReturn("Сашко");
+        when(personaService.getBotName(BOT_ID)).thenReturn("Сашко");
+        when(personaService.getPersonaResponse("Ти бот?", BOT_ID)).thenReturn(null);
         when(deepSeekApiClient.chat(any(DeepSeekChatRequest.class), eq(-2L), eq(15)))
                 .thenReturn(Mono.just(stillBadResponse));
-        StepVerifier.create(refinerService.refineResponse(aiResponse, "Ти бот?", 12345L))
+        StepVerifier.create(refinerService.refineResponse(aiResponse, "Ти бот?", 12345L, BOT_ID))
                 .expectNextMatches(response -> response.contains("чому ти запитуєш"))
                 .verifyComplete();
     }
@@ -132,11 +135,11 @@ class ResponseRefinerServiceImplTest {
     @DisplayName("use fallback when client returns error")
     void useFallbackOnClientError() {
         String aiResponse = "Я штучний інтелект";
-        lenient().when(personaService.getBotIdentity()).thenReturn("Тест");
-        lenient().when(personaService.getBotName()).thenReturn("Тест");
+        lenient().when(personaService.getBotIdentity(BOT_ID)).thenReturn("Тест");
+        lenient().when(personaService.getBotName(BOT_ID)).thenReturn("Тест");
         lenient().when(deepSeekApiClient.chat(any(DeepSeekChatRequest.class), eq(-2L), eq(15)))
                 .thenReturn(Mono.error(new RuntimeException("API timeout")));
-        StepVerifier.create(refinerService.refineResponse(aiResponse, "Розкажи про себе", 99L))
+        StepVerifier.create(refinerService.refineResponse(aiResponse, "Розкажи про себе", 99L, BOT_ID))
                 .expectNextMatches(response -> response != null && !response.isBlank())
                 .verifyComplete();
     }
@@ -144,8 +147,8 @@ class ResponseRefinerServiceImplTest {
     @Test
     @DisplayName("use alternative response when original is empty")
     void useAlternativeWhenOriginalEmpty() {
-        when(personaService.getPersonaResponse("Привіт")).thenReturn("Агов!");
-        StepVerifier.create(refinerService.refineResponse("", "Привіт", 12345L))
+        when(personaService.getPersonaResponse("Привіт", BOT_ID)).thenReturn("Агов!");
+        StepVerifier.create(refinerService.refineResponse("", "Привіт", 12345L, BOT_ID))
                 .expectNext("Агов!")
                 .verifyComplete();
         verify(deepSeekApiClient, never()).chat(any(), anyLong(), anyInt());
@@ -154,8 +157,8 @@ class ResponseRefinerServiceImplTest {
     @Test
     @DisplayName("use alternative response when original is null")
     void useAlternativeWhenOriginalNull() {
-        when(personaService.getPersonaResponse("Як справи?")).thenReturn("Все норм!");
-        StepVerifier.create(refinerService.refineResponse(null, "Як справи?", 12345L))
+        when(personaService.getPersonaResponse("Як справи?", BOT_ID)).thenReturn("Все норм!");
+        StepVerifier.create(refinerService.refineResponse(null, "Як справи?", 12345L, BOT_ID))
                 .expectNext("Все норм!")
                 .verifyComplete();
     }
@@ -163,24 +166,24 @@ class ResponseRefinerServiceImplTest {
     @Test
     @DisplayName("generate photo deflection for photo-related questions")
     void generatePhotoDeflection() {
-        when(personaService.getPersonaResponse("Покажи фото")).thenReturn(null);
-        String response = refinerService.generateAlternativeResponse("Покажи фото", 12345L);
+        when(personaService.getPersonaResponse("Покажи фото", BOT_ID)).thenReturn(null);
+        String response = refinerService.generateAlternativeResponse("Покажи фото", 12345L, BOT_ID);
         assertThat(response, is(notNullValue()));
     }
 
     @Test
     @DisplayName("generate bot deflection for bot-related questions")
     void generateBotDeflection() {
-        when(personaService.getPersonaResponse("Ти бот?")).thenReturn(null);
-        String response = refinerService.generateAlternativeResponse("Ти бот?", 12345L);
+        when(personaService.getPersonaResponse("Ти бот?", BOT_ID)).thenReturn(null);
+        String response = refinerService.generateAlternativeResponse("Ти бот?", 12345L, BOT_ID);
         assertThat(response, containsString("чому ти запитуєш"));
     }
 
     @Test
     @DisplayName("use persona response when available")
     void usePersonaResponseWhenAvailable() {
-        when(personaService.getPersonaResponse("Хто ти?")).thenReturn("Я Андрій, звичайний хлопець");
-        String response = refinerService.generateAlternativeResponse("Хто ти?", 12345L);
+        when(personaService.getPersonaResponse("Хто ти?", BOT_ID)).thenReturn("Я Андрій, звичайний хлопець");
+        String response = refinerService.generateAlternativeResponse("Хто ти?", 12345L, BOT_ID);
         assertThat(response, is("Я Андрій, звичайний хлопець"));
     }
 
@@ -188,12 +191,12 @@ class ResponseRefinerServiceImplTest {
     @DisplayName("build correct refinement prompt with persona")
     void buildCorrectRefinementPrompt() {
         String aiResponse = "Так, я бот";
-        when(personaService.getBotIdentity()).thenReturn("молодий програміст Олег");
-        when(personaService.getBotName()).thenReturn("Олег");
+        when(personaService.getBotIdentity(BOT_ID)).thenReturn("молодий програміст Олег");
+        when(personaService.getBotName(BOT_ID)).thenReturn("Олег");
         ArgumentCaptor<DeepSeekChatRequest> requestCaptor = ArgumentCaptor.forClass(DeepSeekChatRequest.class);
         when(deepSeekApiClient.chat(requestCaptor.capture(), eq(-2L), eq(15)))
                 .thenReturn(Mono.just("Нормальна відповідь"));
-        StepVerifier.create(refinerService.refineResponse(aiResponse, "Ти людина?", 555L))
+        StepVerifier.create(refinerService.refineResponse(aiResponse, "Ти людина?", 555L, BOT_ID))
                 .expectNext("Нормальна відповідь")
                 .verifyComplete();
         DeepSeekChatRequest capturedRequest = requestCaptor.getValue();
@@ -210,11 +213,11 @@ class ResponseRefinerServiceImplTest {
     void useCorrectTimeout() {
         String aiResponse = "Так, я бот і допоможу";
         String safeResponse = "Ну звичайно допоможу!";
-        when(personaService.getBotIdentity()).thenReturn("Тест");
-        when(personaService.getBotName()).thenReturn("Тест");
+        when(personaService.getBotIdentity(BOT_ID)).thenReturn("Тест");
+        when(personaService.getBotName(BOT_ID)).thenReturn("Тест");
         when(deepSeekApiClient.chat(any(DeepSeekChatRequest.class), eq(-2L), eq(15)))
                 .thenReturn(Mono.just(safeResponse));
-        StepVerifier.create(refinerService.refineResponse(aiResponse, "Хто ти?", 123L))
+        StepVerifier.create(refinerService.refineResponse(aiResponse, "Хто ти?", 123L, BOT_ID))
                 .expectNext(safeResponse)
                 .verifyComplete();
         verify(deepSeekApiClient).chat(any(DeepSeekChatRequest.class), eq(-2L), eq(15));
@@ -225,5 +228,29 @@ class ResponseRefinerServiceImplTest {
     void handleCyrillicAndSpecialCharacters() {
         String response = "Привіт! Як справи? 👋 Гарного дня! «цитата» — дефіс";
         assertThat(refinerService.needsRefinement(response), is(false));
+    }
+
+    @Test
+    @DisplayName("each persona refines into its own identity, not the primary's")
+    void refinementIsScopedToTheRepliedPersona() {
+        String secondPersona = "persona-second";
+        when(personaService.getBotIdentity(secondPersona)).thenReturn("Second");
+        when(personaService.getBotName(secondPersona)).thenReturn("Second");
+        when(deepSeekApiClient.chat(any(DeepSeekChatRequest.class), eq(-2L), eq(15)))
+                .thenReturn(Mono.just("Та ну, звичайна людина я"));
+
+        StepVerifier.create(refinerService.refineResponse("Так, я бот", "Ти бот?", 12345L, secondPersona))
+                .expectNextCount(1)
+                .verifyComplete();
+
+        // The refinement prompt is written in the persona's own name. Reading the
+        // startup-loaded singleton instead put the primary persona's name into a
+        // reply sent by a different one — in the exact moment a user was probing.
+        ArgumentCaptor<DeepSeekChatRequest> sent = ArgumentCaptor.forClass(DeepSeekChatRequest.class);
+        verify(deepSeekApiClient).chat(sent.capture(), eq(-2L), eq(15));
+        assertThat(sent.getValue().messages().get(0).content(), containsString("Second"));
+
+        verify(personaService, never()).getBotName(BOT_ID);
+        verify(personaService, never()).getBotIdentity(BOT_ID);
     }
 }

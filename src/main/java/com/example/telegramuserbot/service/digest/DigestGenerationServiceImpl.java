@@ -440,7 +440,10 @@ public final class DigestGenerationServiceImpl implements DigestGenerationServic
     private Mono<String> humanizeContent(String rawContent, DigestPersona persona) {
         if (antiDetectionService.hasAiPatterns(rawContent)) {
             log.info("AI patterns detected in post, running refiner");
-            return responseRefinerService.refineResponse(rawContent, "news post", persona.botId())
+            // DigestPersona carries a Telegram user id, not the String bot instance id
+            // the persona registry is keyed by, so the refiner keeps its previous
+            // behaviour here and speaks as the primary persona.
+            return responseRefinerService.refineResponse(rawContent, "news post", persona.botId(), null)
                     .onErrorReturn(rawContent);
         }
         return Mono.just(rawContent);
