@@ -38,7 +38,6 @@ class PromptBuilderTest {
         personaService = Mockito.mock(PersonaService.class);
         userService = Mockito.mock(UserService.class);
         serializer = new PromptJsonSerializer(new TextOperationsImpl());
-        Mockito.when(personaService.buildPersonaSystemPrompt(any(), anyString())).thenReturn("persona");
         Mockito.when(personaService.buildPersonaSystemPrompt(any(), anyString(), anyString())).thenReturn("persona");
         Mockito.when(userService.buildPersonalizedPrompt(any(User.class), anyString())).thenReturn("user-prefs");
         promptBuilder = new PromptBuilder(personaService, userService, serializer);

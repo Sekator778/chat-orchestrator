@@ -86,14 +86,21 @@ public final class EventWatcherService {
             return Mono.empty();
         }
 
+        // Compare-and-set on the status: an overlapping cycle, or another instance,
+        // may have claimed this same 'new' row between the read and this write.
+        // 0 rows means we lost that race - staying silent then is the point, because
+        // output() is what makes the event visible downstream.
         return repository.updateEventStatus(
                 event.id(),
+                "new",
                 "ready",
                 LocalDateTime.now()
             )
             .doOnSuccess(updated -> {
                 if (updated > 0) {
                     output(event);
+                } else {
+                    log.debug("Event id={} was already claimed by another cycle", event.id());
                 }
             })
             .thenReturn(event)
@@ -101,6 +108,7 @@ public final class EventWatcherService {
                 log.error("Failed to update event id={}: {}", event.id(), error.getMessage());
                 return repository.updateEventStatusWithError(
                         event.id(),
+                        "new",
                         "failed",
                         error.getMessage(),
                         LocalDateTime.now()
