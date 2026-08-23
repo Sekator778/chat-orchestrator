@@ -6,29 +6,35 @@ package com.example.telegramuserbot.service.humanization;
 public interface PersonaService {
     
     /**
-     * Get bot's name
+     * Name of one persona.
+     * <p>
+     * botId is required for the same reason it is on
+     * {@link #buildPersonaSystemPrompt}: several personas are served from one
+     * process, and an answer given without one is the answer for whichever
+     * persona was loaded at startup. A blank botId falls back to that persona
+     * explicitly rather than by accident.
      */
-    String getBotName();
+    String getBotName(String botId);
     
     /**
-     * Get bot's full identity description
+     * Full identity description of one persona.
      */
-    String getBotIdentity();
+    String getBotIdentity(String botId);
     
     /**
-     * Get response for "who are you" questions
+     * Response for "who are you" questions, in one persona's voice.
      */
-    String getAboutSelfResponse();
+    String getAboutSelfResponse(String botId);
     
     /**
-     * Get response for photo requests
+     * Response for photo requests, in one persona's voice.
      */
-    String getPhotoRefusalResponse();
+    String getPhotoRefusalResponse(String botId);
     
     /**
-     * Get response about bot capabilities
+     * Response about capabilities, in one persona's voice.
      */
-    String getCapabilitiesResponse();
+    String getCapabilitiesResponse(String botId);
     
     /**
      * Build the persona-enhanced system prompt for one bot persona.
@@ -40,7 +46,8 @@ public interface PersonaService {
     String buildPersonaSystemPrompt(String basePrompt, String languageHint, String botId);
     
     /**
-     * Get persona-appropriate response for specific question type
+     * Persona-appropriate canned response for a specific question type,
+     * in the voice of the persona that is about to answer.
      */
-    String getPersonaResponse(String userQuestion);
+    String getPersonaResponse(String userQuestion, String botId);
 }
