@@ -48,8 +48,11 @@ COPY --from=builder /build/target/*.jar app.jar
 EXPOSE 8099
 
 # Healthcheck using the Actuator health endpoint
+# Liveness only. The readiness group covers Qdrant, the embeddings service and
+# Kafka; those fail open, and restarting the container would not bring any of
+# them back - it would only flap the app.
 HEALTHCHECK --interval=10s --timeout=5s --retries=3 \
-    CMD curl -f http://localhost:8099/actuator/health || exit 1
+    CMD curl -f http://localhost:8099/actuator/health/liveness || exit 1
 
 # Spring Boot application entry point
 # Profile and connection settings are injected via environment variables
