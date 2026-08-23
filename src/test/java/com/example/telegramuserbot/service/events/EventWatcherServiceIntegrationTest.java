@@ -166,7 +166,7 @@ final class EventWatcherServiceIntegrationTest extends BaseIntegrationTest {
     void skipsAlreadyProcessedEvents() {
         // Arrange: Create event and mark as ready
         Event event = createEvent("btc", "SPIKE", 0.80, "high");
-        repository.updateEventStatus(event.id(), "ready", LocalDateTime.now())
+        repository.updateEventStatus(event.id(), "new", "ready", LocalDateTime.now())
             .block(Duration.ofSeconds(5));
 
         // Act: Process again

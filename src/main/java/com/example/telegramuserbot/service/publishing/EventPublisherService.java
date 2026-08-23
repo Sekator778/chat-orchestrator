@@ -181,11 +181,21 @@ public final class EventPublisherService {
         }
 
         LocalDateTime now = LocalDateTime.now();
+        // The check above reads a status fetched earlier in the cycle; the write below
+        // is what actually decides. Both are needed: the check saves a round-trip, the
+        // compare-and-set keeps two overlapping cycles from publishing the same event.
         Mono<Integer> update = error != null
-            ? events.updateEventStatusWithError(event.id(), next, error, now)
-            : events.updateEventStatus(event.id(), next, now);
+            ? events.updateEventStatusWithError(event.id(), expected, next, error, now)
+            : events.updateEventStatus(event.id(), expected, next, now);
 
-        return update.thenReturn(event);
+        return update
+            .doOnNext(updated -> {
+                if (updated == 0) {
+                    log.warn("Event {} moved out of '{}' before we could set '{}' - skipping",
+                        event.id(), expected, next);
+                }
+            })
+            .thenReturn(event);
     }
 
     /**
