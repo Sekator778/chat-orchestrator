@@ -31,23 +31,13 @@ public interface PersonaService {
     String getCapabilitiesResponse();
     
     /**
-     * Build persona-enhanced system prompt
-     */
-    String buildPersonaSystemPrompt(String basePrompt);
-
-    /**
-     * Build persona-enhanced system prompt with language-specific persona file override.
-     */
-    String buildPersonaSystemPrompt(String basePrompt, String languageHint);
-
-    /**
-     * Build persona-enhanced system prompt for a specific bot persona id.
+     * Build the persona-enhanced system prompt for one bot persona.
      * <p>
-     * Default implementation keeps backward compatibility and ignores botId.
+     * botId is required: with several personas fanned out from a single process,
+     * a prompt built without one is a prompt built for whichever persona happened
+     * to be loaded last.
      */
-    default String buildPersonaSystemPrompt(String basePrompt, String languageHint, String botId) {
-        return buildPersonaSystemPrompt(basePrompt, languageHint);
-    }
+    String buildPersonaSystemPrompt(String basePrompt, String languageHint, String botId);
     
     /**
      * Get persona-appropriate response for specific question type
