@@ -66,9 +66,12 @@ public interface EventRepository extends R2dbcRepository<Event, Long> {
      * Updates event status and processing timestamp.
      *
      * @param eventId event ID
+     * @param expectedStatus status the row must still be in; the update is a
+     *                       compare-and-set, so a row another cycle already moved
+     *                       stays untouched
      * @param newStatus new status value
      * @param processedAt processing timestamp
-     * @return mono with number of updated rows
+     * @return rows updated: 0 means somebody else won the race
      */
     @Modifying
     @Query("""
@@ -77,8 +80,10 @@ public interface EventRepository extends R2dbcRepository<Event, Long> {
             processed_at = :processedAt,
             updated_at = NOW()
         WHERE id = :eventId
+          AND status = :expectedStatus
         """)
     Mono<Integer> updateEventStatus(@Param("eventId") Long eventId,
+                                    @Param("expectedStatus") String expectedStatus,
                                     @Param("newStatus") String newStatus,
                                     @Param("processedAt") LocalDateTime processedAt);
 
@@ -86,10 +91,11 @@ public interface EventRepository extends R2dbcRepository<Event, Long> {
      * Updates event status with error information.
      *
      * @param eventId event ID
+     * @param expectedStatus status the row must still be in (compare-and-set)
      * @param newStatus new status value
      * @param error error message
      * @param processedAt processing timestamp
-     * @return mono with number of updated rows
+     * @return rows updated: 0 means somebody else won the race
      */
     @Modifying
     @Query("""
@@ -99,8 +105,10 @@ public interface EventRepository extends R2dbcRepository<Event, Long> {
             processed_at = :processedAt,
             updated_at = NOW()
         WHERE id = :eventId
+          AND status = :expectedStatus
         """)
     Mono<Integer> updateEventStatusWithError(@Param("eventId") Long eventId,
+                                             @Param("expectedStatus") String expectedStatus,
                                              @Param("newStatus") String newStatus,
                                              @Param("error") String error,
                                              @Param("processedAt") LocalDateTime processedAt);
