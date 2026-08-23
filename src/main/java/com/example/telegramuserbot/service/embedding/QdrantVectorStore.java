@@ -184,50 +184,6 @@ public class QdrantVectorStore {
     }
 
     /**
-     * Top-K cosine similarity search returning id+score pairs.
-     * Used by {@code PersonaProfileService} / {@code ProactiveNewsPostingService} for
-     * the value×cosine blend (A-T3).  Additive: the existing {@link #search} method is
-     * byte-for-byte unchanged.
-     *
-     * @param vector query vector (1024-dim, bge-m3)
-     * @param topK   number of nearest neighbours
-     * @return ordered list of {@link ScoredHit} (id, cosine score), or empty on Qdrant error
-     */
-    public Mono<List<ScoredHit>> searchScored(float[] vector, int topK) {
-        List<Float> vectorList = new ArrayList<>(vector.length);
-        for (float v : vector) {
-            vectorList.add(v);
-        }
-
-        Map<String, Object> body = new HashMap<>();
-        body.put("vector", vectorList);
-        body.put("limit", topK);
-        body.put("with_payload", false);
-
-        return webClient.post()
-                .uri("/collections/" + COLLECTION + "/points/search")
-                .bodyValue(body)
-                .retrieve()
-                .bodyToMono(SearchResponse.class)
-                .timeout(REQUEST_TIMEOUT)
-                .map(resp -> {
-                    List<ScoredHit> hits = new ArrayList<>();
-                    if (resp.result() != null) {
-                        for (ScoredPoint p : resp.result()) {
-                            if (p.id() != null && p.score() != null) {
-                                hits.add(new ScoredHit(p.id(), p.score()));
-                            }
-                        }
-                    }
-                    return hits;
-                })
-                .onErrorResume(ex -> {
-                    log.warn("[QdrantVectorStore] searchScored failed: {}", ex.getMessage());
-                    return Mono.just(List.of());
-                });
-    }
-
-    /**
      * Cosine similarity search <em>restricted to a specific set of candidate ids</em>.
      *
      * <p>Instead of scanning the whole collection (which causes a
@@ -236,8 +192,10 @@ public class QdrantVectorStore {
      * only the supplied candidate ids are scored and returned.  The response payload is tiny
      * regardless of collection size — it is bounded by {@code candidateIds.size()}.
      *
-     * <p>Use this instead of {@link #searchScored(float[], int)} when the caller already
-     * knows the id set it cares about (e.g. recall candidates from Postgres).
+     * <p>This is the only search the store offers, on purpose. The whole-collection variant
+     * it replaced needed a hand-set {@code news.relevance.qdrant-top-k=50000} to work at all
+     * and broke again past that many points; scoring only the ids the caller already has is
+     * correct at any collection size and cheaper.
      *
      * @param vector       query vector (1024-dim, bge-m3)
      * @param candidateIds the exact point ids to score — must be {@code bot.messages.id} values
