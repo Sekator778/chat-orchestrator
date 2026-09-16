@@ -32,21 +32,25 @@ public final class TelegramMessageSenderImpl implements TelegramMessageSender {
     private final TelegramClientManager clientManager;
     private final BotInstanceProvider botInstanceProvider;
     private final OutboundReplyGuard outboundReplyGuard;
+    private final HumanSendPacer pacer;
 
     /**
-     * Constructs sender with client manager, primary bot provider, and outbound guard.
+     * Constructs sender with client manager, primary bot provider, outbound guard and pacer.
      *
      * @param clientManager manages all TDLib sessions by botId
      * @param botInstanceProvider provides the primary bot instance ID
      * @param outboundReplyGuard last-gate moderation: suppresses self-identifying/denylisted text
+     * @param pacer human send pacing (read/think delay, stagger, min gap, typing loop) for {@link #sendPaced}
      */
     public TelegramMessageSenderImpl(
             TelegramClientManager clientManager,
             BotInstanceProvider botInstanceProvider,
-            OutboundReplyGuard outboundReplyGuard) {
+            OutboundReplyGuard outboundReplyGuard,
+            HumanSendPacer pacer) {
         this.clientManager = clientManager;
         this.botInstanceProvider = botInstanceProvider;
         this.outboundReplyGuard = outboundReplyGuard;
+        this.pacer = pacer;
     }
 
     @Override
@@ -158,5 +162,50 @@ public final class TelegramMessageSenderImpl implements TelegramMessageSender {
             });
         }).timeout(Duration.ofSeconds(30), Mono.error(
                 new RuntimeException("Telegram send timed out after 30s (botId=" + botId + ", chatId=" + chatId + ", replyTo=" + replyToMessageId + ")")));
+    }
+
+    @Override
+    public Mono<TdApi.Message> sendPaced(String botId, Long chatId, Long replyToMessageId, String text,
+                                          HumanSendPacer.PacingHints hints) {
+        try {
+            if (outboundReplyGuard.shouldSuppress(text)) {
+                log.warn("⊘ OUTBOUND GUARD suppressed paced send to chatId={} botId={} — staying silent", chatId, botId);
+                return Mono.empty();
+            }
+        } catch (Exception guardEx) {
+            log.warn("⊘ OUTBOUND GUARD error (fail-closed) for chatId={} botId={}: {}", chatId, botId, guardEx.getMessage());
+            return Mono.empty();
+        }
+        TelegramClientFacade client = clientManager.getClient(botId);
+        if (client == null) {
+            log.error("No TDLib client found for botId={}, cannot send to chatId={}", botId, chatId);
+            return Mono.error(new IllegalStateException("No TDLib client for botId=" + botId));
+        }
+        return pacer.pace(botId, chatId, text, hints)
+                .then(Mono.<TdApi.Message>create(sink -> {
+                    TdApi.InputMessageContent content = new TdApi.InputMessageText(
+                            new TdApi.FormattedText(text, null), null, false);
+
+                    TdApi.InputMessageReplyToMessage replyTo = null;
+                    if (replyToMessageId != null) {
+                        replyTo = new TdApi.InputMessageReplyToMessage();
+                        replyTo.chatId = chatId;
+                        replyTo.messageId = replyToMessageId;
+                    }
+
+                    TdApi.SendMessage request = new TdApi.SendMessage(
+                            chatId, 0, replyTo, null, null, content);
+
+                    client.send(request, result -> {
+                        if (result.isError()) {
+                            sink.error(new RuntimeException(
+                                    "Telegram API error (botId=" + botId + "): " + result.getError().message));
+                        } else {
+                            sink.success(result.get());
+                        }
+                    });
+                }).timeout(Duration.ofSeconds(30), Mono.error(
+                        new RuntimeException("Telegram send timed out after 30s (botId=" + botId + ", chatId=" + chatId + ")"))))
+                .doOnNext(sent -> pacer.markSent(botId, chatId));
     }
 }
