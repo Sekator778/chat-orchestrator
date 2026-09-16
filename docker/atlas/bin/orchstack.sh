@@ -262,6 +262,20 @@ run_has_jar() {
      2>/dev/null | grep -qx '[1-9][0-9]*'
 }
 
+# `unzip -l "$jar" | grep -q ...` is the obvious spelling and it is broken here:
+# grep exits at the match, unzip is killed by SIGPIPE with a thousand entries of
+# the listing still unwritten, and `set -o pipefail` reports that as a failure -
+# so every jar looked like it was missing the macOS natives and no build on main
+# was ever installed. Reading the whole listing first keeps the status honest.
+jar_has_macos_natives() {
+  local listing
+  listing="$(unzip -l "$1" 2>/dev/null)" || return 1
+  case "$listing" in
+    *tdlight-natives-*-macos_arm64.jar*) return 0 ;;
+    *)                                   return 1 ;;
+  esac
+}
+
 update_from_main() {
   local deployed runs candidate_id candidate_sha run_id sha tmp new_jar
 
@@ -310,8 +324,7 @@ EOF
   new_jar="$(find "$tmp" -type f -name '*.jar' | head -1)"
   # The natives are baked in at build time: a linux-classifier jar cannot start
   # natively on this Mac, so refuse it here rather than at the health wait.
-  if [ -z "$new_jar" ] ||
-     ! unzip -l "$new_jar" 2>/dev/null | grep -q 'tdlight-natives-.*-macos_arm64\.jar'; then
+  if [ -z "$new_jar" ] || ! jar_has_macos_natives "$new_jar"; then
     rm -rf "$tmp"
     warn "that build has no usable macOS jar - starting the jar already here"
     return 0
