@@ -120,17 +120,24 @@ public class ChatPersonaDispatchPlanner {
                                 .filterWhen(botId -> isAllowedToReply(chatId, botId))
                                 .filterWhen(personaScheduleService::isActiveNow)
                                 .collectList()
-                                .flatMap(scheduledBotIds -> resolveResponders(chatId, scheduledBotIds, addressed))))
-                .flatMap(botIds -> applyDailyQuota(chatId, chatConfigId, botIds, Math.max(0, reserveRetries))
-                        .doOnNext(selected -> log.info("[Chat {}] Persona fan-out final list: {} (chatConfigId={})",
-                                chatId, selected, chatConfigId)));
+                                .flatMap(scheduledBotIds -> addressed.isPresent()
+                                        // Being spoken to and staying silent is the loudest bot-tell there
+                                        // is, so a directly addressed persona answers outside the chat's
+                                        // daily quota as well (the engine's per-minute/hour limits still hold).
+                                        ? resolveResponders(chatId, scheduledBotIds, addressed)
+                                        : selectFinalResponders(chatId, scheduledBotIds)
+                                                .flatMap(selected -> applyDailyQuota(chatId, chatConfigId, selected,
+                                                        Math.max(0, reserveRetries))))))
+                .doOnNext(selected -> log.info("[Chat {}] Persona fan-out final list: {} (chatConfigId={})",
+                        chatId, selected, chatConfigId));
     }
 
     /**
-     * When a persona was directly addressed, it ALWAYS replies — no roll, no cap — as long as
-     * it survived the collector/schedule filters; every other candidate stays quiet. If the
-     * addressed persona was filtered out (asleep or collector-only), nobody answers on its
-     * behalf. Otherwise falls through to the normal probability/cap selection.
+     * When a persona was directly addressed, it ALWAYS replies — no roll, no responder cap and
+     * no daily quota — as long as it survived the collector/schedule filters; every other
+     * candidate stays quiet. If the addressed persona was filtered out (asleep or
+     * collector-only), nobody answers on its behalf. Callers route the no-address case to
+     * {@link #selectFinalResponders} and the daily quota themselves.
      */
     private Mono<List<String>> resolveResponders(long chatId, List<String> scheduledBotIds, Optional<String> addressed) {
         if (addressed.isPresent()) {

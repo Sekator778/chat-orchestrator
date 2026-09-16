@@ -8,6 +8,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
+import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
@@ -41,6 +42,8 @@ public class HumanSendPacer {
 
     /** Telegram's typing status expires ~5s server-side; refresh it before that. */
     private static final Duration TYPING_REFRESH_INTERVAL = Duration.ofMillis(4000);
+    private static final int SWEEP_THRESHOLD = 2048;
+    private static final long SWEEP_MAX_AGE_MS = Duration.ofHours(1).toMillis();
 
     private final TelegramClientManager telegramClientManager;
     private final AppSettingsService appSettings;
@@ -110,6 +113,10 @@ public class HumanSendPacer {
         long preSendMs = Math.min(gappedDelay, Math.max(0L, maxPreSendMs()));
         long gapAppliedMs = Math.max(0L, preSendMs - baseDelay);
         int typingMs = computeTypingWindowMs(outgoingText);
+        // Reserve the planned send slot now, not after the round trip: two paced sends for the
+        // same persona+chat that start within milliseconds of each other must see each other,
+        // otherwise both clear the gap against the same stale timestamp and land together.
+        lastSentAtMs.merge(gapKey, nowMs + preSendMs + typingMs, Math::max);
 
         log.info("TG TIMING: chat={} persona#{} preSendMs={} typingMs={} gapAppliedMs={}",
                 chatId, hints.personaIndex(), preSendMs, typingMs, gapAppliedMs);
@@ -120,7 +127,14 @@ public class HumanSendPacer {
 
     /** Records a successful send so the NEXT pace() call for this (bot,chat) can enforce the gap. */
     public void markSent(String botId, long chatId) {
-        lastSentAtMs.put(key(botId, chatId), clock.millis());
+        long now = clock.millis();
+        lastSentAtMs.merge(key(botId, chatId), now, Math::max);
+        // The map is keyed by persona|chat and never needs history: drop stale entries once in
+        // a while so a long-lived process does not keep every chat it ever spoke in.
+        if (lastSentAtMs.size() > SWEEP_THRESHOLD) {
+            long cutoff = now - SWEEP_MAX_AGE_MS;
+            lastSentAtMs.entrySet().removeIf(e -> e.getValue() < cutoff);
+        }
     }
 
     private static String key(String botId, long chatId) {
@@ -209,11 +223,15 @@ public class HumanSendPacer {
             return Mono.empty();
         }
         long refreshMs = TYPING_REFRESH_INTERVAL.toMillis();
-        Flux.interval(Duration.ZERO, TYPING_REFRESH_INTERVAL)
-                .takeWhile(tick -> tick * refreshMs < typingWindowMs)
-                .concatMap(tick -> sendTypingAction(botId, chatId))
-                .subscribe(v -> { }, e -> log.debug("HumanSendPacer: typing loop error for chat={}: {}", chatId, e.getMessage()));
-        return Mono.delay(Duration.ofMillis(typingWindowMs)).then();
+        // The refresh ticks run beside the window delay and die with it: a cancelled or timed-out
+        // send must not keep showing "typing…" for a message that will never arrive.
+        return Mono.using(
+                () -> Flux.interval(Duration.ZERO, TYPING_REFRESH_INTERVAL)
+                        .takeWhile(tick -> tick * refreshMs < typingWindowMs)
+                        .concatMap(tick -> sendTypingAction(botId, chatId))
+                        .subscribe(v -> { }, e -> log.debug("HumanSendPacer: typing loop error for chat={}: {}", chatId, e.getMessage())),
+                (Disposable ticks) -> Mono.delay(Duration.ofMillis(typingWindowMs)).then(),
+                Disposable::dispose);
     }
 
     private Mono<Void> sendTypingAction(String botId, long chatId) {

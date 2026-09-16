@@ -10,7 +10,7 @@ import com.example.telegramuserbot.service.decision.ResponseDecisionEngine;
  * must NOT NPE on any field.
  *
  * <p>Created by the decision-gate integration in KafkaMessageConsumerService when
- * {@code bot.decision-gate.shape-replies=true}. Passed as nullable through the
+ * {@code decision_gate.shape_replies=true} (bot.app_settings). Passed as nullable through the
  * handler chain; null directives == byte-identical current prompt behavior.
  *
  * @param tone          domain ResponseTone mapped from engine ResponseTone (nullable)

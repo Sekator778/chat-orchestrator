@@ -51,7 +51,9 @@ public class KafkaMessageConsumerService {
 
     private static final Logger log = LoggerFactory.getLogger(KafkaMessageConsumerService.class);
     private static final Long ADMIN_CHAT_ID = 1000000001L;
-    private static final Duration PROCESSING_TIMEOUT = Duration.ofMinutes(3);
+    // Must exceed the whole human pacing budget (reply_timing.max_pre_send_ms + typing cap,
+    // 3.5 min at the seeded defaults) plus the LLM call, or long replies get dropped mid-pause.
+    private static final Duration PROCESSING_TIMEOUT = Duration.ofMinutes(6);
 
     private final TelegramClientManager telegramClientManager;
     private final ObjectMapper objectMapper;
@@ -274,7 +276,7 @@ public class KafkaMessageConsumerService {
                     return botContextResolver.resolveBase(messageEntity.getChatId())
                             .flatMap(base -> {
                                 boolean gateOn = decisionGateEnabled();
-                                // FORWARD-DROP (flag-keyed to decision-gate.enabled):
+                                // FORWARD-DROP (flag-keyed to decision_gate.enabled in bot.app_settings):
                                 // Skip forwarded bot messages if config disallows them.
                                 // This runs before the gate so it is always evaluated when gate is on.
                                 if (gateOn

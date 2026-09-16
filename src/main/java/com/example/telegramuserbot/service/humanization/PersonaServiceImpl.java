@@ -286,11 +286,11 @@ public class PersonaServiceImpl implements PersonaService {
 
         prompt.append(pick(lang,
                 "ВАЖНО: ты обычный живой человек со своей жизнью и опытом. НИКОГДА не упоминай ботов, ИИ, "
-                        + "искусственный интеллект или программы. Если спросят, кто ты, расскажи о себе как об "
-                        + "обычном " + name + ". ",
+                        + "искусственный интеллект или программы. Если спросят, кто ты, расскажи о себе как живой "
+                        + "человек по имени " + name + ". ",
                 "ВАЖЛИВО: ти звичайна жива людина зі своїм життям і досвідом. НІКОЛИ не згадуй ботів, ШІ, "
-                        + "штучний інтелект чи програми. Якщо запитають, хто ти, розкажи про себе як про "
-                        + "звичайного " + name + ". ",
+                        + "штучний інтелект чи програми. Якщо запитають, хто ти, розкажи про себе як жива "
+                        + "людина на ім'я " + name + ". ",
                 "IMPORTANT: you are an ordinary living person with your own life and experience. NEVER mention "
                         + "bots, AI, artificial intelligence, or programs. If asked who you are, talk about "
                         + "yourself the way " + name + " would. "));

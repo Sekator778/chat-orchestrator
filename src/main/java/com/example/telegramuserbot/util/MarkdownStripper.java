@@ -54,7 +54,7 @@ public final class MarkdownStripper {
 
     // Markdown links: [text](url)
     private static final Pattern MD_LINK = Pattern.compile(
-            "\\[([^\\[\\]]+)\\]\\([^)]+\\)");
+            "\\[([^\\[\\]]+)\\]\\(([^)]+)\\)");
 
     // ATX headings: leading # symbols at start of a line
     private static final Pattern HEADING = Pattern.compile(
@@ -102,7 +102,8 @@ public final class MarkdownStripper {
         result = ITALIC_UNDERSCORE.matcher(result).replaceAll("$1");
 
         // Links
-        result = MD_LINK.matcher(result).replaceAll("$1");
+        // Keep the URL: a link the persona meant to share must survive as plain text.
+        result = MD_LINK.matcher(result).replaceAll("$1 ($2)");
 
         // Headings
         result = HEADING.matcher(result).replaceAll("");

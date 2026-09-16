@@ -11,7 +11,6 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import java.util.List;
-import java.util.Locale;
 import java.util.Optional;
 import java.util.function.Function;
 import java.util.regex.Pattern;
@@ -124,9 +123,9 @@ public class PersonaAddressResolver {
     }
 
     private Mono<MatchStep> matchByUsername(String text, List<String> candidateBotIds) {
-        String lowerText = text.toLowerCase(Locale.ROOT);
         return matchStep(candidateBotIds, botId -> selfUserIdResolver.resolveSelfUsername(botId)
-                .map(username -> lowerText.contains("@" + username.toLowerCase(Locale.ROOT)))
+                // Whole-handle match: "@alex" must not claim a message that mentions "@alex_dev".
+                .map(username -> !username.isBlank() && matchesWholeWord(text, "@" + username))
                 .defaultIfEmpty(false));
     }
 

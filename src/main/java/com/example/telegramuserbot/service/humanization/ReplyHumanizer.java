@@ -5,6 +5,7 @@ import com.example.telegramuserbot.util.MarkdownStripper;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
@@ -38,11 +39,16 @@ public class ReplyHumanizer {
 
     private static final Pattern LIST_MARKER = Pattern.compile("^(?:[-*•]|\\d+[.)])\\s+");
 
-    private static final Pattern EMOJI_PATTERN = Pattern.compile(
-            "[\\x{1F600}-\\x{1F64F}]|[\\x{1F300}-\\x{1F5FF}]|[\\x{1F680}-\\x{1F6FF}]|[\\x{1F700}-\\x{1F77F}]" +
-                    "|[\\x{1F780}-\\x{1F7FF}]|[\\x{1F800}-\\x{1F8FF}]|[\\x{2600}-\\x{26FF}]|[\\x{2700}-\\x{27BF}]");
+    // One emoji "unit": a flag pair, or a base pictograph with optional variation selector /
+    // skin tone and any ZWJ-joined continuation (so 👨‍👩‍👧 or 👍🏽 count — and get removed — as one).
+    private static final String EMOJI_BASE = "[\\x{1F300}-\\x{1FAFF}\\x{2600}-\\x{27BF}]";
+    public static final Pattern EMOJI_UNIT = Pattern.compile(
+            "(?:[\\x{1F1E6}-\\x{1F1FF}]{2})"
+                    + "|(?:" + EMOJI_BASE + "\\x{FE0F}?[\\x{1F3FB}-\\x{1F3FF}]?"
+                    + "(?:\\x{200D}" + EMOJI_BASE + "\\x{FE0F}?[\\x{1F3FB}-\\x{1F3FF}]?)*)");
 
     private static final String DASH_MARKER = " — ";
+    private static final int TRAILING_OFFER_SLACK = 30;
 
     // Leading fillers the model opens with instead of just answering — removed (whole
     // leading phrase plus the punctuation/space that follows it).
@@ -55,22 +61,22 @@ public class ReplyHumanizer {
 
     // Trailing "customer support" offers — removed as a whole trailing sentence.
     private static final List<String> RU_TRAILING_OFFERS = List.of(
-            "Надеюсь, это поможет", "Если у вас есть ещё вопросы", "Обращайтесь", "Дайте знать, если");
+            "Надеюсь, это поможет", "Если у вас есть ещё вопросы", "Обращайтесь, если", "Дайте знать, если");
     private static final List<String> UK_TRAILING_OFFERS = List.of(
             "Сподіваюся, це допоможе", "Якщо будуть питання");
     private static final List<String> EN_TRAILING_OFFERS = List.of(
             "I hope this helps", "Let me know if", "Feel free to ask");
 
     private static final List<Pattern> AI_TELL_RU = compile(
-            "\\bя (?:бот|ИИ|искусственный интеллект|языковая модель|нейросеть|программа|ассистент)\\b",
+            "\\bя (?:бот|ИИ|искусственный интеллект|языковая модель|нейросеть|программа|(?:ИИ|виртуальный|голосовой)[- ]?ассистент)\\b",
             "\\bкак (?:ИИ|искусственный интеллект|языковая модель)\\b",
             "\\bу меня нет (?:тела|чувств|мнения)\\b");
     private static final List<Pattern> AI_TELL_UK = compile(
-            "\\bя (?:бот|штучний інтелект|мовна модель|програма|асистент)\\b",
+            "\\bя (?:бот|штучний інтелект|мовна модель|програма|(?:ШІ|віртуальний|голосовий)[- ]?асистент)\\b",
             "\\bяк штучний інтелект\\b");
     private static final List<Pattern> AI_TELL_EN = compile(
             "\\bas an ai\\b",
-            "\\blanguage model\\b",
+            "\\b(?:i'?m|i am|as an?)\\b[^.!?\\n]{0,25}\\blanguage model\\b",
             "\\bi am an ai\\b",
             "\\bi'm an ai\\b",
             "\\bi am a bot\\b",
@@ -163,6 +169,11 @@ public class ReplyHumanizer {
             return plain == null ? "" : plain;
         }
         String[] lines = plain.split("\n", -1);
+        // A single "2. Согласен" is a reference to an earlier point, not a list — keep it.
+        long markerLines = Arrays.stream(lines).filter(l -> LIST_MARKER.matcher(l.strip()).find()).count();
+        if (markerLines < 2) {
+            return plain;
+        }
         List<String> outLines = new ArrayList<>();
         List<String> listSentences = new ArrayList<>();
         for (String line : lines) {
@@ -252,11 +263,16 @@ public class ReplyHumanizer {
                 break;
             }
             String lastSentence = sentences[sentences.length - 1].strip();
+            // Only a short canned closing line goes, and never the only sentence there is —
+            // "Обращайтесь в приёмные часы с 9 до 17" carries real content and stays.
             boolean matched = false;
-            for (String phrase : offers) {
-                if (startsWithIgnoreCase(lastSentence, phrase)) {
-                    matched = true;
-                    break;
+            if (sentences.length > 1) {
+                for (String phrase : offers) {
+                    if (startsWithIgnoreCase(lastSentence, phrase)
+                            && lastSentence.length() <= phrase.length() + TRAILING_OFFER_SLACK) {
+                        matched = true;
+                        break;
+                    }
                 }
             }
             if (!matched) {
@@ -303,13 +319,11 @@ public class ReplyHumanizer {
 
     private String moderateDashes(String text) {
         int first = text.indexOf(DASH_MARKER);
-        if (first < 0) {
+        if (first < 0 || text.indexOf(DASH_MARKER, first + DASH_MARKER.length()) < 0) {
             return text;
         }
-        int second = text.indexOf(DASH_MARKER, first + DASH_MARKER.length());
-        if (second < 0) {
-            return text;
-        }
+        // Keep the first dash; turn later ones into commas unless the dash is doing real work:
+        // a numeric range ("10 — 15%"), or the start of a sentence/line (direct speech).
         StringBuilder sb = new StringBuilder(text.substring(0, first + DASH_MARKER.length()));
         int pos = first + DASH_MARKER.length();
         while (true) {
@@ -318,10 +332,25 @@ public class ReplyHumanizer {
                 sb.append(text.substring(pos));
                 break;
             }
-            sb.append(text, pos, next).append(", ");
+            sb.append(text, pos, next);
+            sb.append(isStructuralDash(text, next) ? DASH_MARKER : ", ");
             pos = next + DASH_MARKER.length();
         }
         return sb.toString();
+    }
+
+    private boolean isStructuralDash(String text, int dashStart) {
+        char before = text.charAt(dashStart - 1);
+        int afterIdx = dashStart + DASH_MARKER.length();
+        char after = afterIdx < text.length() ? text.charAt(afterIdx) : ' ';
+        if (Character.isDigit(before) || before == '%' || Character.isDigit(after)) {
+            return true;
+        }
+        int i = dashStart - 1;
+        while (i >= 0 && text.charAt(i) == ' ') {
+            i--;
+        }
+        return i < 0 || ".!?…\n".indexOf(text.charAt(i)) >= 0;
     }
 
     private String applyEmojiStyle(String text, PersonaStyle.EmojiUsage usage) {
@@ -330,7 +359,7 @@ public class ReplyHumanizer {
             case RARE -> 1;
             case OFTEN -> 3;
         };
-        Matcher matcher = EMOJI_PATTERN.matcher(text);
+        Matcher matcher = EMOJI_UNIT.matcher(text);
         StringBuilder sb = new StringBuilder();
         int count = 0;
         while (matcher.find()) {
