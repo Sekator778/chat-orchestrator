@@ -1,0 +1,25 @@
+databaseChangeLog:
+  - changeSet:
+      id: 084-living-persona-timing-knobs
+      author: claude
+      comment: >-
+        WP3 human send-pacing knobs (cs084). Seeds the four new reply_timing.*
+        knobs HumanSendPacer reads (read time, per-(chat,persona) minimum gap,
+        hard cap) plus proactive.engagement.jitter_max_minutes; guarded UPDATEs
+        move reply_timing.typing.cap_ms, reply_timing.random_delay.min_ms/max_ms
+        and decision_gate.fail_open off their old cs064 seed defaults only when
+        a row is still untouched; two stale descriptions are corrected now that
+        timing applies to every chat, not just reply_timing.test_chat_id.
+      changes:
+        - sqlFile:
+            path: ../sql/084-living-persona-timing-knobs.sql
+            relativeToChangelogFile: true
+            splitStatements: false
+            stripComments: false
+      rollback:
+        - sql:
+            sql: |
+              DELETE FROM bot.app_settings WHERE name IN
+                ('reply_timing.read_ms_per_char','reply_timing.read_cap_ms',
+                 'reply_timing.min_gap_same_chat_ms','reply_timing.max_pre_send_ms',
+                 'proactive.engagement.jitter_max_minutes')

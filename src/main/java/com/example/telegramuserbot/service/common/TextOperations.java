@@ -17,7 +17,6 @@ package com.example.telegramuserbot.service.common;
  * String logged = textOps.truncateForLog(content, 80);
  * }</pre>
  *
- * @see com.example.telegramuserbot.service.orchestration.PromptJsonSerializer
  * @see com.example.telegramuserbot.service.publishing.TelegramPostRenderer
  */
 public interface TextOperations {

@@ -63,10 +63,7 @@ final class DigestGenerationServiceImplTest {
     private com.example.telegramuserbot.service.humanization.PersonaService personaService;
 
     @Mock
-    private com.example.telegramuserbot.service.humanization.AntiDetectionService antiDetectionService;
-
-    @Mock
-    private com.example.telegramuserbot.service.humanization.ResponseRefinerService responseRefinerService;
+    private com.example.telegramuserbot.service.humanization.ReplyHumanizer replyHumanizer;
 
     private DigestGenerationServiceImpl service;
 
@@ -77,17 +74,13 @@ final class DigestGenerationServiceImplTest {
                 org.mockito.ArgumentMatchers.anyString(),
                 org.mockito.ArgumentMatchers.any()))
                 .thenAnswer(inv -> inv.getArgument(0));
-        org.mockito.Mockito.when(antiDetectionService.analyzeAndAdjustResponse(
+        // Pass-through humanizer: these tests assert on the raw LLM text, so keep it unchanged.
+        org.mockito.Mockito.when(replyHumanizer.humanize(
                 org.mockito.ArgumentMatchers.anyString(),
                 org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.any()))
-                .thenAnswer(inv -> reactor.core.publisher.Mono.just(inv.getArgument(0)));
-        org.mockito.Mockito.when(antiDetectionService.hasAiPatterns(org.mockito.ArgumentMatchers.anyString()))
-                .thenReturn(false);
-        org.mockito.Mockito.when(antiDetectionService.addStrategicImperfections(
-                org.mockito.ArgumentMatchers.anyString(),
-                org.mockito.ArgumentMatchers.anyDouble()))
-                .thenAnswer(inv -> inv.getArgument(0));
+                .thenAnswer(inv -> new com.example.telegramuserbot.service.humanization.ReplyHumanizer.Humanized(
+                        inv.getArgument(0), false, false));
         // The production generateDigest path always records the run via
         // updateLastRunAt(...).timeout(...) — even when no messages are found —
         // so stub it for every test (LENIENT strictness swallows the unused case).
@@ -100,8 +93,7 @@ final class DigestGenerationServiceImplTest {
                 sourceTrustRepository,
                 deepSeekApiClient,
                 personaService,
-                antiDetectionService,
-                responseRefinerService
+                replyHumanizer
         );
         Field defaultModelField = DigestGenerationServiceImpl.class.getDeclaredField("defaultModel");
         defaultModelField.setAccessible(true);
@@ -346,6 +338,49 @@ final class DigestGenerationServiceImplTest {
         when(personaRepository.updateLastRunAt(anyLong(), any(Instant.class))).thenReturn(Mono.just(1));
         StepVerifier.create(service.generateDigest(9L))
                 .assertNext(dto -> assertThat(dto.messagesIncluded(), is(1)))
+                .verifyComplete();
+    }
+
+    // --- humanizeContent(...) branches, exercised through the public generateDigest(...) API ---
+
+    @Test
+    void humanizeContentKeepsRawContentWhenHumanizerReportsSilence() {
+        DigestPersona persona = createPersona(10L, "SkipTest", "PROFESSIONAL");
+        MessageEntity message = createMessage(111L, 1012L, "Skip test content");
+        when(personaRepository.findById(10L)).thenReturn(Mono.just(persona));
+        when(messageRepository.findQualityMessagesForDigest(any(Instant.class), anyInt(), anyInt()))
+                .thenReturn(Flux.just(message));
+        when(deepSeekApiClient.chat(any(DeepSeekChatRequest.class), anyLong(), anyInt()))
+                .thenReturn(Mono.just("Raw LLM output"));
+        // Digests are human-reviewed before publish (unlike live replies), so a humanizer
+        // silence verdict must NOT drop the content — the raw LLM text is kept instead.
+        when(replyHumanizer.humanize(eq("Raw LLM output"), any(), any()))
+                .thenReturn(new com.example.telegramuserbot.service.humanization.ReplyHumanizer.Humanized("", true, false));
+        when(historyRepository.save(any(DigestHistory.class))).thenReturn(Mono.just(new DigestHistory(10L, "d-test", "content")));
+
+        StepVerifier.create(service.generateDigest(10L))
+                .assertNext(dto -> assertThat(dto.content(), is("Raw LLM output")))
+                .verifyComplete();
+    }
+
+    @Test
+    void humanizeContentUsesHumanizedTextWhenItStillReadsAsAiWritten() {
+        DigestPersona persona = createPersona(11L, "AiTellTest", "PROFESSIONAL");
+        MessageEntity message = createMessage(112L, 1013L, "AI tell test content");
+        when(personaRepository.findById(11L)).thenReturn(Mono.just(persona));
+        when(messageRepository.findQualityMessagesForDigest(any(Instant.class), anyInt(), anyInt()))
+                .thenReturn(Flux.just(message));
+        when(deepSeekApiClient.chat(any(DeepSeekChatRequest.class), anyLong(), anyInt()))
+                .thenReturn(Mono.just("I am an AI language model"));
+        // aiTell=true only logs a warning (see production code) — the humanized text is still
+        // what gets used, and the pipeline must not throw.
+        when(replyHumanizer.humanize(eq("I am an AI language model"), any(), any()))
+                .thenReturn(new com.example.telegramuserbot.service.humanization.ReplyHumanizer.Humanized(
+                        "humanized fallback text", false, true));
+        when(historyRepository.save(any(DigestHistory.class))).thenReturn(Mono.just(new DigestHistory(11L, "d-test", "content")));
+
+        StepVerifier.create(service.generateDigest(11L))
+                .assertNext(dto -> assertThat(dto.content(), is("humanized fallback text")))
                 .verifyComplete();
     }
 

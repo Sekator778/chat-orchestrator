@@ -17,6 +17,7 @@ import com.example.telegramuserbot.service.orchestration.ResponseOrchestrator;
 import com.example.telegramuserbot.service.orchestration.dto.ResponseDirectives;
 import com.example.telegramuserbot.service.persistence.MessagePersistenceService;
 import com.example.telegramuserbot.service.processing.IdempotencyService;
+import com.example.telegramuserbot.service.publishing.HumanSendPacer;
 import com.example.telegramuserbot.service.ratelimit.ResponseRateLimitGate;
 import com.example.telegramuserbot.service.safety.OutboundReplyGuard;
 import com.example.telegramuserbot.service.telegram.OwnAccountSenderFilter;
@@ -42,7 +43,6 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
-import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeoutException;
 
 
@@ -51,7 +51,9 @@ public class KafkaMessageConsumerService {
 
     private static final Logger log = LoggerFactory.getLogger(KafkaMessageConsumerService.class);
     private static final Long ADMIN_CHAT_ID = 1000000001L;
-    private static final Duration PROCESSING_TIMEOUT = Duration.ofMinutes(3);
+    // Must exceed the whole human pacing budget (reply_timing.max_pre_send_ms + typing cap,
+    // 3.5 min at the seeded defaults) plus the LLM call, or long replies get dropped mid-pause.
+    private static final Duration PROCESSING_TIMEOUT = Duration.ofMinutes(6);
 
     private final TelegramClientManager telegramClientManager;
     private final ObjectMapper objectMapper;
@@ -79,6 +81,10 @@ public class KafkaMessageConsumerService {
     private final PersonaScheduleService personaScheduleService;
     private final OutboundReplyGuard outboundReplyGuard;
 
+    // Human send pacing (read/think delay, mandatory stagger, min gap, typing loop) for every
+    // direct reply this consumer sends — see HumanSendPacer for the reply_timing.* knobs.
+    private final HumanSendPacer pacer;
+
     @Value("${llm.persona-fanout.concurrency:4}")
     private int personaFanOutConcurrency;
 
@@ -89,19 +95,11 @@ public class KafkaMessageConsumerService {
     // value is used more than once in a single computation.
     //
     //   chain_limit.max_bot_messages_per_post  — cap on the bot conversation chain per post
-    //   reply_timing.typing.*                  — typing-indicator window (ms/char, capped)
-    //   reply_timing.random_delay.*            — pre-send "thinking" delay window (max<=0 = off)
-    //   reply_timing.stagger.step_ms           — per-persona stagger so two never reply at once
-    //   reply_timing.test_chat_id              — retained for backward compat; no longer a gate
-    //                                            (random-delay + stagger now apply to all chats)
     //   decision_gate.enabled / shape_replies / fail_open — ResponseDecisionEngine gate flags
+    //
+    // reply_timing.* knobs (typing window, random delay, stagger, min-gap, read time, cap)
+    // moved to HumanSendPacer (WP3) — every send path routes through it now.
     private int maxBotMessagesPerPost() { return appSettings.getInt("chain_limit.max_bot_messages_per_post", 4); }
-    private int typingMsPerChar()        { return appSettings.getInt("reply_timing.typing.ms_per_char", 60); }
-    private int typingCapMs()            { return appSettings.getInt("reply_timing.typing.cap_ms", 8000); }
-    private long replyRandomDelayMinMs() { return appSettings.getLong("reply_timing.random_delay.min_ms", 0L); }
-    private long replyRandomDelayMaxMs() { return appSettings.getLong("reply_timing.random_delay.max_ms", 0L); }
-    private long replyStaggerStepMs()    { return appSettings.getLong("reply_timing.stagger.step_ms", 3000L); }
-    private long replyTimingTestChatId() { return appSettings.getLong("reply_timing.test_chat_id", -4964162923L); }
     private boolean decisionGateEnabled() { return appSettings.getBoolean("decision_gate.enabled", false); }
     private boolean shapeRepliesEnabled() { return appSettings.getBoolean("decision_gate.shape_replies", false); }
     private boolean failOpen()            { return appSettings.getBoolean("decision_gate.fail_open", true); }
@@ -121,7 +119,8 @@ public class KafkaMessageConsumerService {
                                        OwnAccountSenderFilter ownAccountSenderFilter,
                                        AppSettingsService appSettings,
                                        PersonaScheduleService personaScheduleService,
-                                       OutboundReplyGuard outboundReplyGuard) {
+                                       OutboundReplyGuard outboundReplyGuard,
+                                       HumanSendPacer pacer) {
         this.telegramClientManager = telegramClientManager;
         this.objectMapper = objectMapper;
         this.messageRepository = messageRepository;
@@ -138,6 +137,7 @@ public class KafkaMessageConsumerService {
         this.appSettings = appSettings;
         this.personaScheduleService = personaScheduleService;
         this.outboundReplyGuard = outboundReplyGuard;
+        this.pacer = pacer;
     }
 
     @KafkaListener(topics = "${kafka.topic.incoming-messages}")
@@ -276,7 +276,7 @@ public class KafkaMessageConsumerService {
                     return botContextResolver.resolveBase(messageEntity.getChatId())
                             .flatMap(base -> {
                                 boolean gateOn = decisionGateEnabled();
-                                // FORWARD-DROP (flag-keyed to decision-gate.enabled):
+                                // FORWARD-DROP (flag-keyed to decision_gate.enabled in bot.app_settings):
                                 // Skip forwarded bot messages if config disallows them.
                                 // This runs before the gate so it is always evaluated when gate is on.
                                 if (gateOn
@@ -404,7 +404,7 @@ public class KafkaMessageConsumerService {
 
         Mono<List<String>> botIdsMono = fixedBotIds != null
                 ? Mono.just(fixedBotIds)
-                : chatPersonaDispatchPlanner.planBotIds(messageEntity.getChatId(), base.config() != null ? base.config().getId() : null);
+                : chatPersonaDispatchPlanner.planBotIds(messageEntity.getChatId(), base.config() != null ? base.config().getId() : null, messageEntity);
 
         return botIdsMono
                 .flatMapMany(botIds -> {
@@ -504,7 +504,8 @@ public class KafkaMessageConsumerService {
             log.info("🚫 ORCH: Empty response generated for chat={}, message={}", originalMessageEntity.getChatId(), originalMessageEntity.getMessageId());
             return Mono.empty();
         }
-        return sendTelegramReply(botId, originalMessageEntity.getChatId(), originalMessageEntity.getMessageId(), payload.content(), personaIndex, decidedDelaySeconds)
+        int triggerTextLength = triggerTextLength(originalMessageEntity);
+        return sendTelegramReply(botId, originalMessageEntity.getChatId(), originalMessageEntity.getMessageId(), payload.content(), personaIndex, decidedDelaySeconds, triggerTextLength)
                 .onErrorResume(e -> {
                     if (!SendFailureClassifier.isPermanentAccessError(e)) {
                         // Muting a chat is irreversible (there is no un-mark path), so it is
@@ -537,12 +538,17 @@ public class KafkaMessageConsumerService {
                 });
     }
 
-    // Legacy overload: preserves signature for internal calls without decided delay
-    private Mono<Void> dispatchOrchestratedResponse(MessageEntity originalMessageEntity,
-                                                     com.example.telegramuserbot.dto.ResponsePayload payload,
-                                                     String botId,
-                                                     int personaIndex) {
-        return dispatchOrchestratedResponse(originalMessageEntity, payload, botId, personaIndex, null);
+    /**
+     * Length of the message being answered — used by {@link HumanSendPacer} to simulate reading
+     * time before a direct reply. Falls back to the caption for a media-only trigger post.
+     */
+    private static int triggerTextLength(MessageEntity messageEntity) {
+        String content = messageEntity.getContent();
+        if (content != null && !content.isBlank()) {
+            return content.length();
+        }
+        String caption = messageEntity.getCaption();
+        return caption != null ? caption.length() : 0;
     }
 
     private Mono<List<MessageEntity>> persistBotReplies(String botId, List<TdApi.Message> messages) {
@@ -557,13 +563,16 @@ public class KafkaMessageConsumerService {
     }
 
     /**
-     * Sends a Telegram reply, threading the optional decided delay into the timing path.
+     * Sends a Telegram reply, pacing it through {@link HumanSendPacer} (read/think delay,
+     * mandatory stagger, per-(chat,persona) minimum gap, repeating typing indicator) before
+     * the actual send.
      *
-     * @param decidedDelaySeconds nullable pre-send delay from the decision engine (MUST-FIX #3)
+     * @param decidedDelaySeconds nullable pre-send delay floor from the decision engine (MUST-FIX #3)
+     * @param triggerTextLength   length of the message being answered (drives simulated read time)
      */
     private Mono<TdApi.Message> sendTelegramReply(String botId, long chatId, long originalMessageId,
                                                    String cleanedReplyText, int personaIndex,
-                                                   Integer decidedDelaySeconds) {
+                                                   Integer decidedDelaySeconds, int triggerTextLength) {
         if (cleanedReplyText == null || cleanedReplyText.isBlank()) {
             log.info("--- TG SEND SKIP: No reply text provided for chat={}, originalMessageId={}.", chatId, originalMessageId);
             return Mono.empty();
@@ -584,94 +593,17 @@ public class KafkaMessageConsumerService {
             return Mono.empty();
         }
 
-        return showTypingIndicatorAndSendReply(botId, chatId, originalMessageId, cleanedReplyText, personaIndex, decidedDelaySeconds);
-    }
-
-    // Legacy overload: keeps existing call sites compiling without changes
-    private Mono<TdApi.Message> sendTelegramReply(String botId, long chatId, long originalMessageId,
-                                                   String cleanedReplyText, int personaIndex) {
-        return sendTelegramReply(botId, chatId, originalMessageId, cleanedReplyText, personaIndex, null);
+        return showTypingIndicatorAndSendReply(botId, chatId, originalMessageId, cleanedReplyText, personaIndex,
+                decidedDelaySeconds, triggerTextLength);
     }
 
     private Mono<TdApi.Message> showTypingIndicatorAndSendReply(String botId, long chatId, long originalMessageId,
                                                                   String cleanedReplyText, int personaIndex,
-                                                                  Integer decidedDelaySeconds) {
-        long preSendDelayMs = computeReplyDelayMs(chatId, personaIndex, decidedDelaySeconds);
-        int typingDurationMs = computeTypingWindowMs(chatId, cleanedReplyText);
-        log.info("--- TG TIMING: chat={} persona#{} preSendDelayMs={} typingMs={}",
-                chatId, personaIndex, preSendDelayMs, typingDurationMs);
-
-        Mono<Void> showTypingMono = Mono.create(sink -> {
-            TdApi.SendChatAction chatAction = new TdApi.SendChatAction(chatId, 0, new TdApi.ChatActionTyping());
-            TelegramClientFacade client = telegramClientManager.getClient(botId);
-            if (client == null) {
-                log.error("No telegram client found for botId={} when showing typing", botId);
-                sink.success();
-                return;
-            }
-            client.send(chatAction, result -> {
-                if (result.isError()) {
-                    log.debug("Failed to show typing indicator for chat {}: {}", chatId, result.getError());
-                }
-                sink.success();
-            });
-        });
-
-        // Sequence: staggered random "thinking" pause -> typing bubble for a length-proportional
-        // window -> send. preSendDelayMs is 0 for non-test chats, so they keep legacy behavior.
-        Mono<Void> preSend = preSendDelayMs > 0 ? Mono.delay(Duration.ofMillis(preSendDelayMs)).then() : Mono.empty();
-        return preSend
-                .then(showTypingMono)
-                .then(Mono.delay(Duration.ofMillis(typingDurationMs)))
-                .then(sendActualReply(botId, chatId, originalMessageId, cleanedReplyText));
-    }
-
-    /**
-     * Pre-send "thinking" delay: a random value in the configured window plus a
-     * per-persona stagger (personaIndex * step-ms). Applies to ALL chats.
-     * When {@code randomMax <= 0} the random part is skipped (feature off).
-     *
-     * <p>When decidedDelaySeconds is non-null (shape-replies=true and engine
-     * provided a delay), the decided value is used as a FLOOR over the random part.
-     * The decided floor bypasses the {@code randomMax<=0} check so engine-decided
-     * delays still apply even when the random window is disabled.
-     */
-    private long computeReplyDelayMs(long chatId, int personaIndex, Integer decidedDelaySeconds) {
-        long decidedMs = decidedDelaySeconds != null && decidedDelaySeconds > 0
-                ? decidedDelaySeconds * 1000L
-                : 0L;
-        long randomMax = replyRandomDelayMaxMs();
-        long staggerStep = replyStaggerStepMs();
-        long stagger = (long) personaIndex * Math.max(0L, staggerStep);
-
-        if (randomMax <= 0) {
-            // Random window is off; apply decided floor + stagger if present
-            return decidedMs > 0 ? decidedMs + stagger : 0L;
-        }
-        long min = Math.max(0L, replyRandomDelayMinMs());
-        long max = Math.max(min + 1L, randomMax);
-        long randomPart = ThreadLocalRandom.current().nextLong(min, max);
-        long legacyDelay = randomPart + stagger;
-        // Apply decided floor: take the larger of legacy random and engine-decided
-        return Math.max(legacyDelay, decidedMs);
-    }
-
-    // Legacy overload without decidedDelaySeconds (preserves old call sites)
-    private long computeReplyDelayMs(long chatId, int personaIndex) {
-        return computeReplyDelayMs(chatId, personaIndex, null);
-    }
-
-    /**
-     * Typing-indicator window. Config-driven (ms-per-char, capped) for ALL chats
-     * when the random-delay feature is on ({@code randomMax > 0}); otherwise falls
-     * back to the legacy heuristic so unchanged behaviour when feature is disabled.
-     */
-    private int computeTypingWindowMs(long chatId, String text) {
-        if (replyRandomDelayMaxMs() <= 0) {
-            return Math.min(calculateTypingDuration(text), 8000);
-        }
-        int length = text == null ? 0 : text.length();
-        return Math.min(Math.max(1, length) * typingMsPerChar(), typingCapMs());
+                                                                  Integer decidedDelaySeconds, int triggerTextLength) {
+        HumanSendPacer.PacingHints hints = HumanSendPacer.PacingHints.direct(personaIndex, decidedDelaySeconds, triggerTextLength);
+        return pacer.pace(botId, chatId, cleanedReplyText, hints)
+                .then(sendActualReply(botId, chatId, originalMessageId, cleanedReplyText))
+                .doOnNext(m -> pacer.markSent(botId, chatId));
     }
 
     private Mono<TdApi.Message> sendActualReply(String botId, long chatId, long originalMessageId, String cleanedReplyText) {
@@ -780,17 +712,6 @@ public class KafkaMessageConsumerService {
         }
         String normalized = text.replaceAll("\\s+", " ").trim();
         return normalized.length() > 80 ? normalized.substring(0, 77) + "..." : normalized;
-    }
-
-
-    private int calculateTypingDuration(String text) {
-        if (text == null || text.isEmpty()) {
-            return 1000;
-        }
-        int baseDuration = (text.length() * 60 * 1000) / 200;
-        double variation = 0.8 + (Math.random() * 0.4);
-        double complexityMultiplier = text.length() > 500 ? 1.3 : (text.length() > 200 ? 1.1 : 1.0);
-        return (int) (baseDuration * variation * complexityMultiplier);
     }
 
     private static ReplyMetadata extractReplyMetadata(TdApi.MessageReplyTo replyTo) {

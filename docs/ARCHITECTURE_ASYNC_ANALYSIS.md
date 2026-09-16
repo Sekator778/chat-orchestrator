@@ -1,3 +1,5 @@
+> **Superseded (2026-09-16):** `ResponseRefinerServiceImpl`, `AntiDetectionServiceImpl` and `UserCommunicationProfile` referenced below were removed with the living-persona work; see `docs/persona-humanization.md`.
+
 # Architecture & Async/Reactive Analysis - High-Throughput Review
 
 ## Executive Summary

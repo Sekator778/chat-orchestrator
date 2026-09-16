@@ -1,8 +1,6 @@
 package com.example.telegramuserbot.service.orchestration;
 
 import com.example.telegramuserbot.domain.PendingResponse;
-import com.example.telegramuserbot.domain.User;
-import com.example.telegramuserbot.service.UserService;
 import com.example.telegramuserbot.service.llm.conversation.ConversationFormatter;
 import com.example.telegramuserbot.service.llm.conversation.LlmSpeakerContext;
 import com.example.telegramuserbot.service.llm.dto.ApiMessage;
@@ -14,7 +12,6 @@ import reactor.core.publisher.Mono;
 
 import java.util.LinkedList;
 import java.util.List;
-import java.util.Optional;
 
 @Component
 public class LlmMessageBuilder {
@@ -23,20 +20,17 @@ public class LlmMessageBuilder {
     private final ConversationFormatter conversationFormatter;
     private final TelegramSelfUserIdResolver selfUserIdResolver;
     private final PendingResponseCoordinator pendingResponseCoordinator;
-    private final UserService userService;
     private final ReplyKnowledgeService replyKnowledgeService;
 
     public LlmMessageBuilder(PromptBuilder promptBuilder,
                              ConversationFormatter conversationFormatter,
                              TelegramSelfUserIdResolver selfUserIdResolver,
                              PendingResponseCoordinator pendingResponseCoordinator,
-                             UserService userService,
                              ReplyKnowledgeService replyKnowledgeService) {
         this.promptBuilder = promptBuilder;
         this.conversationFormatter = conversationFormatter;
         this.selfUserIdResolver = selfUserIdResolver;
         this.pendingResponseCoordinator = pendingResponseCoordinator;
-        this.userService = userService;
         this.replyKnowledgeService = replyKnowledgeService;
     }
 
@@ -86,10 +80,6 @@ public class LlmMessageBuilder {
                         : fallback)
                 .onErrorReturn(fallback);
 
-        Mono<Optional<User>> userMono = resolveUserForPrompt(context)
-                .map(Optional::ofNullable)
-                .switchIfEmpty(Mono.just(Optional.empty()));
-
         String chatText = context != null && context.triggeringMessage() != null
                 ? (context.triggeringMessage().getContent() != null && !context.triggeringMessage().getContent().isBlank()
                         ? context.triggeringMessage().getContent()
@@ -97,12 +87,11 @@ public class LlmMessageBuilder {
                 : null;
         Mono<String> knowledgeMono = replyKnowledgeService.buildKnowledgeBlock(chatText).defaultIfEmpty("");
 
-        return Mono.zip(userMono, conversationMono, pendingMono, knowledgeMono)
+        return Mono.zip(conversationMono, pendingMono, knowledgeMono)
                 .map(tuple -> {
-                    User user = tuple.getT1().orElse(null);
-                    ConversationFormatter.FormatResult conversation = tuple.getT2();
-                    List<PendingResponse> pending = tuple.getT3();
-                    String knowledge = tuple.getT4();
+                    ConversationFormatter.FormatResult conversation = tuple.getT1();
+                    List<PendingResponse> pending = tuple.getT2();
+                    String knowledge = tuple.getT3();
                     LinkedList<ApiMessage> finalMessages = new LinkedList<>(conversation.messages());
                     LlmSpeakerContext speakers = conversation.speakerContext();
                     EnhancedPromptRequest promptRequest = EnhancedPromptRequest.builder()
@@ -112,7 +101,6 @@ public class LlmMessageBuilder {
                             .llmParameters(cfg.llmParameters())
                             .fallbackPrompt("Respond naturally with context.")
                             .fallbackLanguage(cfg.config() != null ? cfg.config().getLanguage() : "auto")
-                            .user(user)
                             .speakerContext(speakers)
                             .pendingResponses(pending)
                             .directives(directives)
@@ -121,17 +109,5 @@ public class LlmMessageBuilder {
                     finalMessages.addFirst(new ApiMessage("system", promptBuilder.buildEnhancedPrompt(promptRequest)));
                     return finalMessages;
                 });
-    }
-
-    private Mono<User> resolveUserForPrompt(ContextCollector.ConversationContext context) {
-        if (context == null) {
-            return Mono.empty();
-        }
-        var triggering = context.triggeringMessage();
-        if (triggering == null || triggering.getSenderId() == null) {
-            return Mono.empty();
-        }
-        return userService.getUserByTelegramId(triggering.getSenderId())
-                .onErrorResume(e -> Mono.empty());
     }
 }

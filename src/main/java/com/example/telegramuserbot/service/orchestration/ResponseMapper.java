@@ -6,21 +6,20 @@ import com.example.telegramuserbot.service.llm.EnhancedLlmService;
 import org.springframework.stereotype.Component;
 
 /**
- * Маппер EnhancedLlmResponse -> ResponsePayload с лёгкой постобработкой.
+ * Маппер EnhancedLlmResponse -> ResponsePayload.
+ *
+ * <p>Pure mapping: every handler has already run the text through
+ * {@link ResponsePostProcessor} with the persona's own language and style, so a
+ * second pass here (which could only use "auto" + default style) would undo the
+ * persona-specific decisions — emoji kept for an OFTEN persona, a final period
+ * kept for one that never drops it.
  */
 @Component
 public class ResponseMapper {
 
-    private final ResponsePostProcessor responsePostProcessor;
-
-    public ResponseMapper(ResponsePostProcessor responsePostProcessor) {
-        this.responsePostProcessor = responsePostProcessor;
-    }
-
     public ResponsePayload mapEnhanced(EnhancedLlmService.EnhancedLlmResponse response, int ctxMessages, int ctxChars) {
-        String processed = responsePostProcessor.postProcess(response.formattedContent(), response.template());
         return ResponsePayload.ofEnhanced(
-                processed,
+                response.formattedContent(),
                 response.style() != null ? response.style() : ResponseStyle.ADAPTIVE,
                 response.tone(),
                 ctxMessages,
@@ -29,4 +28,3 @@ public class ResponseMapper {
         );
     }
 }
-

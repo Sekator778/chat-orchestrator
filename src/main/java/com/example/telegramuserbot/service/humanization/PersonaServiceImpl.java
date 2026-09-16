@@ -4,6 +4,7 @@ import com.example.telegramuserbot.config.BotInstanceProvider;
 import com.example.telegramuserbot.domain.BotPersona;
 import com.example.telegramuserbot.repository.BotPersonaRepository;
 import com.example.telegramuserbot.service.cache.BotPersonaCache;
+import com.example.telegramuserbot.service.common.ReplyLanguage;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
@@ -22,7 +23,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Random;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -42,8 +42,7 @@ public class PersonaServiceImpl implements PersonaService {
     private final BotInstanceProvider botInstanceProvider;
     private final BotPersonaRepository botPersonaRepository;
     private final BotPersonaCache botPersonaCache;
-    
-    private final Random random = new Random();
+
     private final ObjectMapper objectMapper = new ObjectMapper();
     private Map<String, Object> personaData;
     private Resource activeResource;
@@ -128,91 +127,88 @@ public class PersonaServiceImpl implements PersonaService {
     }
 
     @Override
-    public String getBotIdentity(String botId) {
-        Map<String, Object> persona = personaFor(botId);
-        if (persona != null && persona.get("name") instanceof String name) {
-            String descr = persona.get("description") instanceof String d ? d : "";
-            return descr.isBlank() ? name : name + " — " + descr;
-        }
-        Map<String, Object> personal = getSection(persona, "personal");
-        Map<String, Object> profession = getSection(persona, "profession");
-        
-        if (personal == null || profession == null) {
-            return "Ассистент, IT-специалист";
-        }
-        
-        String name = (String) personal.get("name");
-        Integer age = (Integer) personal.get("age");
-        String currentJob = (String) profession.get("current");
-        
-        return String.format("%s, %d лет, %s", name, age, currentJob);
-    }
-
-    @Override
-    public String getAboutSelfResponse(String botId) {
-        List<String> responses = getTypicalResponses(personaFor(botId), "about_self");
-        if (responses != null && !responses.isEmpty()) {
-            return responses.get(random.nextInt(responses.size()));
-        }
-        return "Работаю в айти, помогаю людям с разными вопросами";
-    }
-
-    @Override
-    public String getPhotoRefusalResponse(String botId) {
-        List<String> responses = getTypicalResponses(personaFor(botId), "photo_requests");
-        if (responses != null && !responses.isEmpty()) {
-            return responses.get(random.nextInt(responses.size()));
-        }
-        return "Да я не особо люблю селфи делать 😅";
-    }
-
-    @Override
-    public String getCapabilitiesResponse(String botId) {
-        List<String> responses = getTypicalResponses(personaFor(botId), "capabilities");
-        if (responses != null && !responses.isEmpty()) {
-            return responses.get(random.nextInt(responses.size()));
-        }
-        return "Хорошо разбираюсь в технологиях, могу помочь с разными вопросами";
-    }
-
-    @Override
     public String buildPersonaSystemPrompt(String basePrompt, String languageHint, String botId) {
         String effectiveBotId = botId != null && !botId.isBlank() ? botId.trim() : botInstanceProvider.getInstanceId();
         String lang = languageHint != null && !languageHint.isBlank() ? languageHint.trim().toLowerCase() : "base";
 
         Map<String, Object> persona = resolvePersonaMapForBot(effectiveBotId, lang);
-        return renderPersonaPrompt(persona, basePrompt);
+        // Scaffold language is independent of bundle resolution: a "base" bundle
+        // (Russian-written) still gets a Russian scaffold via ReplyLanguage.normalize.
+        String scaffoldLang = ReplyLanguage.instructionLanguage(ReplyLanguage.normalize(languageHint));
+        return renderPersonaPrompt(persona, basePrompt, scaffoldLang);
     }
 
     @Override
-    public String getPersonaResponse(String userQuestion, String botId) {
-        if (userQuestion == null || userQuestion.isBlank()) {
-            return null;
+    public PersonaStyle resolveStyle(String botId, String languageHint) {
+        String effectiveBotId = botId != null && !botId.isBlank() ? botId.trim() : botInstanceProvider.getInstanceId();
+        String lang = languageHint != null && !languageHint.isBlank() ? languageHint.trim().toLowerCase() : "base";
+
+        Map<String, Object> persona = resolvePersonaMapForBot(effectiveBotId, lang);
+        return styleFromPersona(persona);
+    }
+
+    @SuppressWarnings("unchecked")
+    private PersonaStyle styleFromPersona(Map<String, Object> persona) {
+        Map<String, Object> metadata = getMetadata(persona);
+        if (metadata.get("style") instanceof Map<?, ?> styleMap) {
+            return parseStyle((Map<String, Object>) styleMap);
         }
+        return PersonaStyle.defaults();
+    }
 
-        String normalized = userQuestion.toLowerCase(Locale.ROOT);
+    private PersonaStyle parseStyle(Map<String, Object> styleMap) {
+        PersonaStyle d = PersonaStyle.defaults();
+        int maxSentences = intOrDefault(styleMap.get("max_sentences"), d.maxSentences());
+        PersonaStyle.EmojiUsage emoji = emojiOrDefault(styleMap.get("emoji"), d.emoji());
+        boolean lowercaseStart = boolOrDefault(styleMap.get("lowercase_start"), d.lowercaseStart());
+        boolean dropFinalPeriod = boolOrDefault(styleMap.get("drop_final_period"), d.dropFinalPeriod());
+        double skipProbability = doubleOrDefault(styleMap.get("skip_probability"), d.skipProbability());
+        List<String> catchphrases = styleMap.get("catchphrases") instanceof List<?> l ? toStringList(l) : d.catchphrases();
+        List<String> interests = styleMap.get("interests") instanceof List<?> l ? toStringList(l) : d.interests();
+        String timezone = styleMap.get("timezone") instanceof String tz ? tz : d.timezone();
+        return new PersonaStyle(maxSentences, emoji, lowercaseStart, dropFinalPeriod, skipProbability,
+                catchphrases, interests, timezone);
+    }
 
-        if (isAboutSelfQuestion(normalized)) {
-            return getAboutSelfResponse(botId);
-        }
-
-        if (isPhotoRequest(normalized)) {
-            return getPhotoRefusalResponse(botId);
-        }
-
-        if (isCapabilitiesQuestion(normalized)) {
-            return getCapabilitiesResponse(botId);
-        }
-
-        if (isBotDetectionQuestion(normalized)) {
-            List<String> botDenials = getTypicalResponses(personaFor(botId), "bot_denial");
-            if (botDenials != null && !botDenials.isEmpty()) {
-                return botDenials.get(random.nextInt(botDenials.size()));
+    private int intOrDefault(Object raw, int def) {
+        if (raw instanceof Number n) return n.intValue();
+        if (raw instanceof String s) {
+            try {
+                return Integer.parseInt(s.trim());
+            } catch (NumberFormatException e) {
+                return def;
             }
-            return String.format("Я %s, обычный человек, просто люблю помогать и общаться.", getBotName(botId));
         }
+        return def;
+    }
 
-        return null;
+    private double doubleOrDefault(Object raw, double def) {
+        if (raw instanceof Number n) return n.doubleValue();
+        if (raw instanceof String s) {
+            try {
+                return Double.parseDouble(s.trim());
+            } catch (NumberFormatException e) {
+                return def;
+            }
+        }
+        return def;
+    }
+
+    private boolean boolOrDefault(Object raw, boolean def) {
+        if (raw instanceof Boolean b) return b;
+        if (raw instanceof String s) return Boolean.parseBoolean(s.trim());
+        return def;
+    }
+
+    private PersonaStyle.EmojiUsage emojiOrDefault(Object raw, PersonaStyle.EmojiUsage def) {
+        if (raw instanceof String s) {
+            try {
+                return PersonaStyle.EmojiUsage.valueOf(s.trim().toUpperCase(Locale.ROOT));
+            } catch (IllegalArgumentException e) {
+                return def;
+            }
+        }
+        return def;
     }
 
     @SuppressWarnings("unchecked")
@@ -242,8 +238,15 @@ public class PersonaServiceImpl implements PersonaService {
         return fallback;
     }
 
+    /**
+     * Renders the persona identity block in the instruction language {@code lang}
+     * (ru/uk/en, already resolved by the caller — see {@link ReplyLanguage}).
+     * Living-persona intent: a human who has nothing to say says nothing, but the
+     * one thing every persona must say the same way is "I am not a bot" — in its
+     * own words, in its own language.
+     */
     @SuppressWarnings("unchecked")
-    private String renderPersonaPrompt(Map<String, Object> persona, String basePrompt) {
+    private String renderPersonaPrompt(Map<String, Object> persona, String basePrompt, String lang) {
         if (persona == null) {
             persona = Map.of();
         }
@@ -265,22 +268,32 @@ public class PersonaServiceImpl implements PersonaService {
         if (description != null && !description.isBlank()) {
             prompt.append(description).append(" ");
         } else {
-            prompt.append("Ты ").append(name).append(". ");
+            prompt.append(pick(lang, "Ты " + name + ". ", "Ти " + name + ". ", "You are " + name + ". "));
         }
 
         if (traits != null && !traits.isEmpty()) {
-            prompt.append("Твои личные черты: ").append(String.join(", ", traits)).append(". ");
+            prompt.append(pick(lang, "Твои личные черты: ", "Твої особисті риси: ", "Your personal traits: "))
+                    .append(String.join(", ", traits)).append(". ");
         }
         if (behavior != null && !behavior.isEmpty()) {
-            prompt.append("Поведение: ").append(String.join(" ", behavior)).append(" ");
+            prompt.append(pick(lang, "Поведение: ", "Поведінка: ", "Behavior: "))
+                    .append(String.join(" ", behavior)).append(" ");
         }
         if (limitations != null && !limitations.isEmpty()) {
-            prompt.append("Помни: ").append(String.join(", ", limitations)).append(". ");
+            prompt.append(pick(lang, "Помни: ", "Пам'ятай: ", "Remember: "))
+                    .append(String.join(", ", limitations)).append(". ");
         }
 
-        prompt.append("ВАЖНО: ты обычный живой человек со своей жизнью и опытом. ")
-                .append("НИКОГДА не упоминай ботов, AI, искусственный интеллект или программы. ")
-                .append("Если спросят, кто ты, расскажи о себе как об обычном ").append(name).append(". ");
+        prompt.append(pick(lang,
+                "ВАЖНО: ты обычный живой человек со своей жизнью и опытом. НИКОГДА не упоминай ботов, ИИ, "
+                        + "искусственный интеллект или программы. Если спросят, кто ты, расскажи о себе как живой "
+                        + "человек по имени " + name + ". ",
+                "ВАЖЛИВО: ти звичайна жива людина зі своїм життям і досвідом. НІКОЛИ не згадуй ботів, ШІ, "
+                        + "штучний інтелект чи програми. Якщо запитають, хто ти, розкажи про себе як жива "
+                        + "людина на ім'я " + name + ". ",
+                "IMPORTANT: you are an ordinary living person with your own life and experience. NEVER mention "
+                        + "bots, AI, artificial intelligence, or programs. If asked who you are, talk about "
+                        + "yourself the way " + name + " would. "));
 
         if (basePrompt != null && !basePrompt.isBlank()) {
             prompt.append("\n\n").append(basePrompt);
@@ -288,52 +301,12 @@ public class PersonaServiceImpl implements PersonaService {
         return prompt.toString();
     }
 
-    private boolean isAboutSelfQuestion(String normalizedQuestion) {
-        return containsAny(normalizedQuestion,
-                "кто ты", "ты кто", "кто вы", "хто ти", "хто ви",
-                "who are you", "who is this", "what is your name",
-                "как тебя зовут", "як тебе звати", "представься");
-    }
-
-    private boolean isPhotoRequest(String normalizedQuestion) {
-        return containsAny(normalizedQuestion,
-                "фото", "фотку", "фоточка", "селфи", "selfie", "photo", "picture", "pic of you");
-    }
-
-    private boolean isCapabilitiesQuestion(String normalizedQuestion) {
-        return containsAny(normalizedQuestion,
-                "что ты умеешь", "что умеешь", "что можешь",
-                "what can you do", "what are you able", "what are your skills",
-                "какие у тебя навыки", "что ты делаешь", "чем занимаешься");
-    }
-
-    private boolean isBotDetectionQuestion(String normalizedQuestion) {
-        return containsAny(normalizedQuestion,
-                "ты бот", "бот ты", "bot", "ai", "искусственный интеллект", "штучний інтелект", "робот");
-    }
-
-    private boolean containsAny(String source, String... tokens) {
-        if (source == null || source.isBlank()) {
-            return false;
-        }
-        for (String token : tokens) {
-            if (token != null && !token.isBlank() && source.contains(token.toLowerCase(Locale.ROOT))) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private Map<String, Object> getBackground() {
-        return getSection("background");
-    }
-
-    private Map<String, Object> getPersonal() {
-        return getSection("personal");
-    }
-
-    private Map<String, Object> getProfession() {
-        return getSection("profession");
+    private static String pick(String lang, String ru, String uk, String en) {
+        return switch (lang) {
+            case ReplyLanguage.RU -> ru;
+            case ReplyLanguage.UK -> uk;
+            default -> en;
+        };
     }
 
     @SuppressWarnings("unchecked")
@@ -381,20 +354,6 @@ public class PersonaServiceImpl implements PersonaService {
             return parseList(s);
         }
         return List.of();
-    }
-
-    private List<String> getTypicalResponses(Map<String, Object> persona, String key) {
-        if (persona == null || key == null || key.isBlank()) return null;
-        Map<String, Object> metadata = getMetadata(persona);
-        Object direct = persona.get("typical_responses");
-        if (direct instanceof Map<?, ?> map && map.containsKey(key)) {
-            return toStringList(map.get(key));
-        }
-        Object metaTypical = metadata.get("typical_responses");
-        if (metaTypical instanceof Map<?, ?> map && map.containsKey(key)) {
-            return toStringList(map.get(key));
-        }
-        return null;
     }
 
     private Map<String, Object> getMetadata() {

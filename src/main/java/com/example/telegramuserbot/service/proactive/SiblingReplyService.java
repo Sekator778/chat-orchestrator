@@ -13,6 +13,7 @@ import com.example.telegramuserbot.service.llm.dto.ApiMessage;
 import com.example.telegramuserbot.service.llm.dto.DeepSeekChatRequest;
 import com.example.telegramuserbot.service.orchestration.PersonaScheduleService;
 import com.example.telegramuserbot.service.orchestration.ResponsePostProcessor;
+import com.example.telegramuserbot.service.publishing.HumanSendPacer;
 import com.example.telegramuserbot.service.publishing.TelegramMessageSender;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -337,8 +338,11 @@ public class SiblingReplyService {
                     log.info("[SiblingReply] Sending reply botId={} chatId={} replyTo={} len={}",
                             replyingBotId, chatId, originMessageId, cleanText.length());
 
-                    // Guard 10: send through the choke point — OutboundReplyGuard + kill-switch apply automatically
-                    return telegramSender.send(replyingBotId, chatId, originMessageId, cleanText)
+                    // Guard 10: send through the choke point — OutboundReplyGuard + kill-switch +
+                    // HumanSendPacer (read/think delay, stagger, min gap, typing loop) all apply.
+                    int originContentLength = content != null ? content.length() : 0;
+                    return telegramSender.sendPaced(replyingBotId, chatId, originMessageId, cleanText,
+                                    HumanSendPacer.PacingHints.direct(0, null, originContentLength))
                             .doOnSuccess(msg -> log.info("[SiblingReply] Sent botId={} chatId={} tgMsgId={}",
                                     replyingBotId, chatId, msg != null ? msg.id : null))
                             .onErrorResume(e -> {

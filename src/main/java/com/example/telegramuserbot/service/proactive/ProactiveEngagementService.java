@@ -3,11 +3,15 @@ package com.example.telegramuserbot.service.proactive;
 import com.example.telegramuserbot.domain.ProactiveEngagement;
 import com.example.telegramuserbot.repository.MessageRepository;
 import com.example.telegramuserbot.repository.ProactiveEngagementRepository;
+import com.example.telegramuserbot.service.config.AppSettingsService;
 import com.example.telegramuserbot.service.llm.dto.ApiMessage;
 import com.example.telegramuserbot.service.orchestration.BotContextResolver;
 import com.example.telegramuserbot.service.orchestration.LlmCallService;
+import com.example.telegramuserbot.service.orchestration.PersonaScheduleService;
 import com.example.telegramuserbot.service.orchestration.PromptBuilder;
+import com.example.telegramuserbot.service.orchestration.ResponsePostProcessor;
 import com.example.telegramuserbot.service.orchestration.dto.EnhancedPromptRequest;
+import com.example.telegramuserbot.service.publishing.HumanSendPacer;
 import com.example.telegramuserbot.service.publishing.TelegramMessageSender;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -19,6 +23,8 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import com.example.telegramuserbot.service.llm.conversation.LlmSpeakerContext;
+import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * Manages proactive engagement: one bot-initiated message per day per persona per chat.
@@ -43,20 +49,32 @@ public final class ProactiveEngagementService {
     private final BotContextResolver botContextResolver;
     private final PromptBuilder promptBuilder;
     private final LlmCallService llmCallService;
+    private final PersonaScheduleService personaScheduleService;
+    private final ResponsePostProcessor responsePostProcessor;
+    private final AppSettingsService appSettings;
 
     public ProactiveEngagementService(ProactiveEngagementRepository engagementRepository,
                                       MessageRepository messageRepository,
                                       TelegramMessageSender messageSender,
                                       BotContextResolver botContextResolver,
                                       PromptBuilder promptBuilder,
-                                      LlmCallService llmCallService) {
+                                      LlmCallService llmCallService,
+                                      PersonaScheduleService personaScheduleService,
+                                      ResponsePostProcessor responsePostProcessor,
+                                      AppSettingsService appSettings) {
         this.engagementRepository = engagementRepository;
         this.messageRepository = messageRepository;
         this.messageSender = messageSender;
         this.botContextResolver = botContextResolver;
         this.promptBuilder = promptBuilder;
         this.llmCallService = llmCallService;
+        this.personaScheduleService = personaScheduleService;
+        this.responsePostProcessor = responsePostProcessor;
+        this.appSettings = appSettings;
     }
+
+    /** Upper bound (minutes) of the random extra delay before a daily post, so posts stop landing on the exact top-of-hour tick. */
+    private int proactiveJitterMaxMinutes() { return appSettings.getInt("proactive.engagement.jitter_max_minutes", 20); }
 
     /**
      * Creates a proactive engagement schedule for a chat+persona pair if one does not exist yet.
@@ -106,11 +124,51 @@ public final class ProactiveEngagementService {
      * Generates content via LLM with the per-persona system prompt, then sends directly.
      * The pending response queue is intentionally bypassed: proactive messages originate
      * from the bot's own initiative, not as a reaction to a triggering human message.
+     *
+     * <p>Guards applied before/around generation (real-data evidence: daily posts firing on
+     * the exact top-of-hour cron read as bot-like):
+     * <ol>
+     *   <li>Respect the persona's activity window ({@link PersonaScheduleService}) — an
+     *       hourly cron tick does not mean the persona is "awake".</li>
+     *   <li>A random extra delay (0..{@code proactive.engagement.jitter_max_minutes}) so the
+     *       send no longer lands in the exact top-of-hour instant.</li>
+     * </ol>
      */
     private Mono<Void> generateAndSend(ProactiveEngagement engagement, Long anchorId) {
         long chatId = engagement.getChatId();
         String botId = engagement.getBotInstanceId();
 
+        return personaScheduleService.isActiveNow(botId)
+                .flatMap(active -> {
+                    if (!active) {
+                        log.info("Proactive skip chatId={} botId={}: persona is outside its activity window", chatId, botId);
+                        return Mono.<Void>empty();
+                    }
+                    int jitterMaxMinutes = Math.max(0, proactiveJitterMaxMinutes());
+                    long jitterMs = jitterMaxMinutes > 0
+                            ? ThreadLocalRandom.current().nextLong(0, jitterMaxMinutes * 60_000L)
+                            : 0L;
+                    Mono<Void> jitter = jitterMs > 0 ? Mono.delay(Duration.ofMillis(jitterMs)).then() : Mono.empty();
+                    // The jitter can be up to 20 minutes: re-check the window after it, the way
+                    // SiblingReplyService does after its own delay, so a persona whose day ends
+                    // inside the jitter does not post after bedtime.
+                    return jitter.then(personaScheduleService.isActiveNow(botId))
+                            .flatMap(stillActive -> {
+                                if (!stillActive) {
+                                    log.info("Proactive skip chatId={} botId={}: activity window closed during jitter", chatId, botId);
+                                    return Mono.<Void>empty();
+                                }
+                                return generateAndSendNow(engagement, anchorId, chatId, botId);
+                            });
+                })
+                .onErrorResume(ex -> {
+                    log.error("Proactive send failed chatId={} botId={}: {}", chatId, botId, ex.getMessage());
+                    return Mono.empty();
+                });
+    }
+
+    /** The actual generate-then-send pipeline, run once the schedule/jitter guards above have passed. */
+    private Mono<Void> generateAndSendNow(ProactiveEngagement engagement, Long anchorId, long chatId, String botId) {
         return messageRepository.findByChatIdOrderByDateDesc(chatId, PageRequest.of(0, 10))
                 .filter(m -> !m.isOutgoing())
                 .collectList()
@@ -129,6 +187,10 @@ public final class ProactiveEngagementService {
                                             .llmParameters(cfg.llmParameters())
                                             .fallbackPrompt("Respond naturally as yourself.")
                                             .fallbackLanguage(cfg.config() != null ? cfg.config().getLanguage() : "ru")
+                                            // Without a speaker context PromptBuilder falls back to the
+                                            // primary persona's identity and style — the wrong voice in
+                                            // every chat the primary is not posting in.
+                                            .speakerContext(new LlmSpeakerContext(botId, null, List.of()))
                                             .build();
 
                                     List<ApiMessage> messages = new ArrayList<>();
@@ -144,29 +206,36 @@ public final class ProactiveEngagementService {
                                                 }
                                             });
 
+                                    String lastInboundContent = recentMessages.get(0).getContent();
+                                    int lastInboundLength = lastInboundContent != null ? lastInboundContent.length() : 0;
                                     long triggeringMsgId = recentMessages.get(0).getMessageId();
+
                                     return llmCallService.call(chatId, triggeringMsgId, "PROACTIVE", messages,
                                                     cfg.config(), cfg.llmParameters())
-                                            .timeout(Duration.ofSeconds(60));
-                                }))
-                .flatMap(text -> {
-                    if (text == null || text.isBlank()) {
-                        log.warn("Proactive LLM returned empty chatId={} botId={}", chatId, botId);
-                        return Mono.empty();
-                    }
-                    return messageSender.send(botId, chatId, text.trim())
-                            .timeout(Duration.ofSeconds(30))
-                            .flatMap(sent -> engagementRepository.markSent(
-                                            engagement.getId(), Instant.now(), anchorId)
-                                    .timeout(Duration.ofSeconds(5))
-                                    .doOnSuccess(rows -> log.info("Proactive sent chatId={} botId={} markedSent={}",
-                                            chatId, botId, rows))
-                                    .then());
-                })
-                .onErrorResume(ex -> {
-                    log.error("Proactive send failed chatId={} botId={}: {}", chatId, botId, ex.getMessage());
-                    return Mono.empty();
-                });
+                                            .timeout(Duration.ofSeconds(60))
+                                            .flatMap(rawText -> {
+                                                if (rawText == null || rawText.isBlank()) {
+                                                    log.warn("Proactive LLM returned empty chatId={} botId={}", chatId, botId);
+                                                    return Mono.<Void>empty();
+                                                }
+                                                String text = responsePostProcessor.postProcess(rawText, cfg.template());
+                                                if (text == null || text.isBlank()) {
+                                                    log.info("Proactive skip chatId={} botId={}: post-processed reply is blank", chatId, botId);
+                                                    return Mono.<Void>empty();
+                                                }
+                                                // No outer timeout: the paced send deliberately waits out the
+                                                // read/thinking/typing budget first; the TDLib round trip inside
+                                                // sendPaced carries its own 30 s timeout.
+                                                return messageSender.sendPaced(botId, chatId, null, text,
+                                                                HumanSendPacer.PacingHints.direct(0, null, lastInboundLength))
+                                                        .flatMap(sent -> engagementRepository.markSent(
+                                                                        engagement.getId(), Instant.now(), anchorId)
+                                                                .timeout(Duration.ofSeconds(5))
+                                                                .doOnSuccess(rows -> log.info("Proactive sent chatId={} botId={} markedSent={}",
+                                                                        chatId, botId, rows))
+                                                                .then());
+                                            });
+                                }));
     }
 
     private Mono<ProactiveEngagement> createEngagement(long chatId, String botInstanceId, String language) {

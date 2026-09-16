@@ -3,17 +3,19 @@ package com.example.telegramuserbot.service.orchestration;
 import com.example.telegramuserbot.domain.ContextSettings;
 import com.example.telegramuserbot.domain.LlmParameters;
 import com.example.telegramuserbot.domain.LlmQueryPhase;
+import com.example.telegramuserbot.domain.LlmQueryStatus;
 import com.example.telegramuserbot.domain.PendingResponse;
 import com.example.telegramuserbot.domain.ResponseStyle;
 import com.example.telegramuserbot.domain.ResponseTemplate;
 import com.example.telegramuserbot.domain.ResponseTone;
 import com.example.telegramuserbot.domain.User;
-import com.example.telegramuserbot.dto.MessageContextDto;
 import com.example.telegramuserbot.dto.ResponsePayload;
 import com.example.telegramuserbot.repository.ContextSettingsRepository;
 import com.example.telegramuserbot.service.UserService;
-import com.example.telegramuserbot.service.humanization.AntiDetectionService;
-import com.example.telegramuserbot.service.humanization.ResponseRefinerService;
+import com.example.telegramuserbot.service.common.ReplyLanguage;
+import com.example.telegramuserbot.service.humanization.PersonaService;
+import com.example.telegramuserbot.service.humanization.PersonaStyle;
+import com.example.telegramuserbot.service.humanization.ReplyHumanizer;
 import com.example.telegramuserbot.service.llm.EnhancedLlmService;
 import com.example.telegramuserbot.service.llm.conversation.ConversationFormatter;
 import com.example.telegramuserbot.service.llm.conversation.LlmSpeakerContext;
@@ -86,8 +88,8 @@ public class MultiStageResponseHandler {
     private final ResponseMapper responseMapper;
     private final PendingResponseCoordinator pendingResponseCoordinator;
     private final LlmTrackingFacade trackingFacade;
-    private final AntiDetectionService antiDetectionService;
-    private final ResponseRefinerService responseRefinerService;
+    private final PersonaService personaService;
+    private final ReplyHumanizer replyHumanizer;
     private final EnhancedSingleResponseHandler fallbackHandler;
     private final UserService userService;
     private final ObjectMapper objectMapper;
@@ -103,8 +105,8 @@ public class MultiStageResponseHandler {
                                     ResponseMapper responseMapper,
                                     PendingResponseCoordinator pendingResponseCoordinator,
                                     LlmTrackingFacade trackingFacade,
-                                    AntiDetectionService antiDetectionService,
-                                    ResponseRefinerService responseRefinerService,
+                                    PersonaService personaService,
+                                    ReplyHumanizer replyHumanizer,
                                     EnhancedSingleResponseHandler fallbackHandler,
                                     UserService userService,
                                     ObjectMapper objectMapper,
@@ -119,8 +121,8 @@ public class MultiStageResponseHandler {
         this.responseMapper = responseMapper;
         this.pendingResponseCoordinator = pendingResponseCoordinator;
         this.trackingFacade = trackingFacade;
-        this.antiDetectionService = antiDetectionService;
-        this.responseRefinerService = responseRefinerService;
+        this.personaService = personaService;
+        this.replyHumanizer = replyHumanizer;
         this.fallbackHandler = fallbackHandler;
         this.userService = userService;
         this.objectMapper = objectMapper;
@@ -175,30 +177,56 @@ public class MultiStageResponseHandler {
                 ? runContextAnalysis(chatId, triggeringMessageId, cfg, context, settings, selfUserId, tracker)
                 : Mono.just(ContextSnapshot.empty());
 
+        String lang = cfg != null && cfg.config() != null ? cfg.config().getLanguage() : null;
+        PersonaStyle style = personaService.resolveStyle(cfg != null ? cfg.botInstanceId() : null, lang);
+
         return analysisMono
                 .flatMap(snapshot -> runPlanning(chatId, triggeringMessageId, cfg, context, settings, snapshot, selfUserId, tracker)
-                        .flatMap(plan -> generateDraftWithValidation(chatId, triggeringMessageId, rawText, cfg, template, context, settings, snapshot, plan, selfUserId, tracker, 1, directives)))
-                .flatMap(draft -> searchAugmentor.augmentIfNeeded(draft, rawText != null ? rawText : "", chatId).defaultIfEmpty(draft))
-                .map(content -> {
-                    String processed = responsePostProcessor.postProcess(content, template);
-                    llmCallService.logNormalizedIfChanged(chatId, "MULTI_STAGE", content, processed);
-                    return responseMapper.mapEnhanced(
-                            new EnhancedLlmService.EnhancedLlmResponse(
-                                    processed,
-                                    content,
-                                    Optional.ofNullable(template).map(ResponseTemplate::getResponseStyle).orElse(ResponseStyle.ADAPTIVE),
-                                    Optional.ofNullable(template).map(ResponseTemplate::getResponseTone).orElse(ResponseTone.NEUTRAL),
-                                    context.totalMessages(),
-                                    context.totalCharacters(),
-                                    EnhancedLlmService.ResponseFormat.TEXT,
-                                    template
-                            ),
-                            context.totalMessages(),
-                            context.totalCharacters());
+                        .flatMap(plan -> generateDraftWithValidation(chatId, triggeringMessageId, rawText, cfg, template, context, settings, snapshot, plan, selfUserId, tracker, 1, directives, lang, style, null)))
+                .flatMap(outcome -> {
+                    if (outcome.skip()) {
+                        return skipSilently(chatId, tracker, "MULTI_STAGE: humanizer не оставил текста для отправки (skip/aiTell после ретрая)");
+                    }
+                    return searchAugmentor.augmentIfNeeded(outcome.text(), rawText != null ? rawText : "", chatId).defaultIfEmpty(outcome.text())
+                            .flatMap(content -> {
+                                String processed = responsePostProcessor.postProcess(content, template, lang, style);
+                                llmCallService.logNormalizedIfChanged(chatId, "MULTI_STAGE", content, processed);
+                                if (processed == null || processed.isBlank()) {
+                                    return skipSilently(chatId, tracker, "MULTI_STAGE humanizer вернул пустой текст после поиска (skip/aiTell)");
+                                }
+                                return Mono.just(responseMapper.mapEnhanced(
+                                        new EnhancedLlmService.EnhancedLlmResponse(
+                                                processed,
+                                                content,
+                                                Optional.ofNullable(template).map(ResponseTemplate::getResponseStyle).orElse(ResponseStyle.ADAPTIVE),
+                                                Optional.ofNullable(template).map(ResponseTemplate::getResponseTone).orElse(ResponseTone.NEUTRAL),
+                                                context.totalMessages(),
+                                                context.totalCharacters(),
+                                                EnhancedLlmService.ResponseFormat.TEXT,
+                                                template
+                                        ),
+                                        context.totalMessages(),
+                                        context.totalCharacters()));
+                            });
                 })
                 .flatMap(payload -> pendingResponseCoordinator.maybeQueuePending(chatId, triggeringMessageId, cfg, payload.content(), payload.tone(), "MULTI_STAGE")
                         .flatMap(queued -> trackingFacade.markCompletedOrSkip(tracker, payload.content(), queued)
                                 .then(queued ? Mono.empty() : Mono.just(payload))));
+    }
+
+    /**
+     * Человек, которому нечего сказать, молчит — никакой шаблонной фразы в чат.
+     * Запрос помечается SKIPPED, сообщение не отправляется. Зеркалит
+     * EnhancedSingleResponseHandler.skipSilently.
+     */
+    private Mono<ResponsePayload> skipSilently(long chatId, LlmQueryTracker tracker, String reason) {
+        log.warn("[Chat {}] {} — пропускаем отправку без fallback-фразы", chatId, reason);
+        if (tracker == null) {
+            return Mono.empty();
+        }
+        return tracker.markCompleted(LlmQueryStatus.SKIPPED, null, reason, null, false)
+                .onErrorResume(e -> Mono.empty())
+                .then(Mono.empty());
     }
 
     private Mono<ContextSettings> resolveContextSettings(BotContextResolver.ResolvedConfig cfg) {
@@ -260,7 +288,14 @@ public class MultiStageResponseHandler {
                 .flatMap(raw -> parseResponsePlan(raw).switchIfEmpty(Mono.error(new IllegalStateException("planning JSON parse failed"))));
     }
 
-    private Mono<String> generateDraftWithValidation(long chatId,
+    /**
+     * Generates a draft and, before accepting it, runs it through the humanizer to catch
+     * an AI-tell. One retry is allowed (MAX_DRAFT_ATTEMPTS): the retry adds an extra
+     * user-turn instruction, in the reply language, asking for an ordinary chat rewrite.
+     * If the retry still reads as AI-written (or the humanizer says silence outright),
+     * the draft is dropped — a human who can't phrase it naturally says nothing.
+     */
+    private Mono<DraftOutcome> generateDraftWithValidation(long chatId,
                                                      long triggeringMessageId,
                                                      String rawText,
                                                      BotContextResolver.ResolvedConfig cfg,
@@ -272,17 +307,36 @@ public class MultiStageResponseHandler {
                                                      Long selfUserId,
                                                      LlmQueryTracker tracker,
                                                      int attempt,
-                                                     ResponseDirectives directives) {
+                                                     ResponseDirectives directives,
+                                                     String lang,
+                                                     PersonaStyle style,
+                                                     String extraInstruction) {
         int resolvedAttempt = Math.max(1, attempt);
-        return runDraft(chatId, triggeringMessageId, cfg, template, context, settings, snapshot, plan, selfUserId, tracker, resolvedAttempt, directives)
-                .flatMap(draft -> applyAntiDetectionAndRefine(chatId, triggeringMessageId, rawText, draft, context, settings, tracker, resolvedAttempt,
-                        cfg != null ? cfg.botInstanceId() : null))
-                .flatMap(result -> {
-                    if (!result.shouldRetry() || resolvedAttempt >= MAX_DRAFT_ATTEMPTS) {
-                        return Mono.just(result.text());
+        return runDraft(chatId, triggeringMessageId, cfg, template, context, settings, snapshot, plan, selfUserId, tracker, resolvedAttempt, directives, extraInstruction)
+                .flatMap(draft -> {
+                    ReplyHumanizer.Humanized humanized = replyHumanizer.humanize(draft, lang, style);
+                    if (humanized.skip()) {
+                        return Mono.just(DraftOutcome.silence());
                     }
-                    return generateDraftWithValidation(chatId, triggeringMessageId, rawText, cfg, template, context, settings, snapshot, plan, selfUserId, tracker, resolvedAttempt + 1, directives);
+                    if (humanized.aiTell()) {
+                        if (resolvedAttempt < MAX_DRAFT_ATTEMPTS) {
+                            String normalizedLang = ReplyLanguage.normalize(lang);
+                            return generateDraftWithValidation(chatId, triggeringMessageId, rawText, cfg, template, context, settings, snapshot, plan, selfUserId, tracker, resolvedAttempt + 1, directives, lang, style, rewriteInstruction(normalizedLang));
+                        }
+                        // Attempts exhausted and it still reads as AI-written — never send it as-is.
+                        return Mono.just(DraftOutcome.silence());
+                    }
+                    return Mono.just(DraftOutcome.accept(draft));
                 });
+    }
+
+    /** The user-turn nudge used to regenerate a draft that reads as AI-written, per reply language. */
+    private String rewriteInstruction(String normalizedLang) {
+        return switch (normalizedLang) {
+            case ReplyLanguage.RU -> "Перепиши как обычный человек сказал бы в чате; никогда не упоминай ИИ, модели или программы.";
+            case ReplyLanguage.UK -> "Перепиши так, як звичайна людина сказала б у чаті; ніколи не згадуй ШІ, моделі або програми.";
+            default -> "Rewrite as an ordinary person would say it in a chat; never mention AI, models or programs.";
+        };
     }
 
     private Mono<String> runDraft(long chatId,
@@ -296,7 +350,8 @@ public class MultiStageResponseHandler {
                                  Long selfUserId,
                                  LlmQueryTracker tracker,
                                  int attempt,
-                                 ResponseDirectives directives) {
+                                 ResponseDirectives directives,
+                                 String extraInstruction) {
         Long beforeMessageId = context != null && context.triggeringMessage() != null ? context.triggeringMessage().getMessageId() : null;
 
         LlmSpeakerContext speakers = conversationFormatter.format(
@@ -333,10 +388,13 @@ public class MultiStageResponseHandler {
                     String system = promptBuilder.buildEnhancedPrompt(promptRequest);
 
                     String userPrompt = buildDraftPrompt(context, settings, snapshot, plan, attempt, selfUserId);
-                    List<ApiMessage> messages = List.of(
+                    List<ApiMessage> messages = new ArrayList<>(List.of(
                             new ApiMessage("system", system),
                             new ApiMessage("user", userPrompt)
-                    );
+                    ));
+                    if (extraInstruction != null && !extraInstruction.isBlank()) {
+                        messages.add(new ApiMessage("user", extraInstruction));
+                    }
 
                     LlmParameters stageParams = stageParams(cfg.llmParameters(), null, DRAFT_TEMPERATURE);
                     return llmCallService.call(chatId, triggeringMessageId, "MULTI_STAGE/DRAFT", messages, cfg.config(), stageParams,
@@ -353,49 +411,6 @@ public class MultiStageResponseHandler {
         }
         return userService.getUserByTelegramId(context.triggeringMessage().getSenderId())
                 .onErrorResume(e -> Mono.empty());
-    }
-
-    private Mono<AntiDetectionResult> applyAntiDetectionAndRefine(long chatId,
-                                                                  long triggeringMessageId,
-                                                                  String rawText,
-                                                                  String draft,
-                                                                  ContextCollector.ConversationContext context,
-                                                                  ContextSettings settings,
-                                                                  LlmQueryTracker tracker,
-                                                                  int attempt,
-                                                                  String botId) {
-        String triggerText = rawText != null && !rawText.isBlank()
-                ? rawText
-                : (context != null && context.triggeringMessage() != null ? Optional.ofNullable(context.triggeringMessage().getContent()).orElse("") : "");
-
-        List<String> recent = new ArrayList<>();
-        if (context != null && context.contextMessages() != null) {
-            for (var msg : context.contextMessages()) {
-                if (msg != null && msg.getContent() != null && !msg.getContent().isBlank()) {
-                    recent.add(msg.getContent());
-                }
-            }
-        }
-        MessageContextDto messageContext = MessageContextDto.withHistory(chatId, triggerText, recent, true);
-
-        Long senderId = context != null && context.triggeringMessage() != null ? context.triggeringMessage().getSenderId() : null;
-        return antiDetectionService.analyzeAndAdjustResponse(draft, senderId, messageContext)
-                .defaultIfEmpty(draft)
-                .flatMap(adjusted -> responseRefinerService.refineResponse(adjusted, triggerText, senderId, botId)
-                        .defaultIfEmpty(adjusted))
-                .flatMap(refined -> {
-                    boolean hasAi = antiDetectionService.hasAiPatterns(refined);
-                    double risk = antiDetectionService.calculateDetectionRisk(refined, messageContext);
-
-                    if (tracker != null) {
-                        ApiMessage req = new ApiMessage("user", truncateForTracking(draft));
-                        String verdict = hasAi ? "AI" : "HUMAN";
-                        return tracker.recordPhase(LlmQueryPhase.AI_DETECTION, attempt, List.of(req), verdict, Map.of("risk", risk))
-                                .onErrorResume(e -> Mono.empty())
-                                .thenReturn(new AntiDetectionResult(refined, hasAi && risk >= 0.7));
-                    }
-                    return Mono.just(new AntiDetectionResult(refined, hasAi && risk >= 0.7));
-                });
     }
 
     private String buildConversationDigest(ContextCollector.ConversationContext context, ContextSettings settings, Long selfUserId) {
@@ -613,14 +628,6 @@ public class MultiStageResponseHandler {
         return items;
     }
 
-    private String truncateForTracking(String text) {
-        if (text == null) {
-            return "";
-        }
-        String trimmed = text.strip();
-        return trimmed.length() > 800 ? trimmed.substring(0, 800) + " ...[truncated]" : trimmed;
-    }
-
     private record ContextSnapshot(String summary,
                                    String userMood,
                                    String riskLevel,
@@ -641,5 +648,14 @@ public class MultiStageResponseHandler {
                                 String openingIdea,
                                 String closingIdea) { }
 
-    private record AntiDetectionResult(String text, boolean shouldRetry) { }
+    /** Outcome of the draft-validation loop: either text ready to send, or silence. */
+    private record DraftOutcome(String text, boolean skip) {
+        static DraftOutcome accept(String text) {
+            return new DraftOutcome(text, false);
+        }
+
+        static DraftOutcome silence() {
+            return new DraftOutcome(null, true);
+        }
+    }
 }
