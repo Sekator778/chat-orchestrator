@@ -279,3 +279,8 @@ databaseChangeLog:
   # tdlib_operations indexes, which froze MESSAGE_SYNC/CHAT_DISCOVERY (cs083)
   - include:
       file: db/changelog/changes/083-tdlib-operations-partial-indexes.yaml
+
+  # Living-persona send-pacing knobs for HumanSendPacer (read time, min gap,
+  # max cap, proactive jitter) + guarded moves off old timing defaults (cs084)
+  - include:
+      file: db/changelog/changes/084-living-persona-timing-knobs.yaml

@@ -3,6 +3,7 @@ package com.example.telegramuserbot.integration;
 import com.example.telegramuserbot.service.llm.dto.DeepSeekChatResponse;
 import com.example.telegramuserbot.service.llm.dto.ResponseChoice;
 import com.example.telegramuserbot.service.llm.dto.ResponseMessage;
+import com.example.telegramuserbot.service.publishing.HumanSendPacer;
 import com.example.telegramuserbot.service.publishing.TelegramMessageSender;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import it.tdlight.Init;
@@ -363,6 +364,12 @@ public abstract class BaseIntegrationTest {
 
                 @Override
                 public Mono<TdApi.Message> send(String botId, Long chatId, Long replyToMessageId, String text) {
+                    return Mono.just(dummyMessage(chatId));
+                }
+
+                @Override
+                public Mono<TdApi.Message> sendPaced(String botId, Long chatId, Long replyToMessageId, String text,
+                                                       HumanSendPacer.PacingHints hints) {
                     return Mono.just(dummyMessage(chatId));
                 }
 
