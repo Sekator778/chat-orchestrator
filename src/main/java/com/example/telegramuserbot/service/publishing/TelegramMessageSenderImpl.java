@@ -138,14 +138,19 @@ public final class TelegramMessageSenderImpl implements TelegramMessageSender {
                 false
             );
 
-            TdApi.InputMessageReplyToMessage replyTo = new TdApi.InputMessageReplyToMessage();
-            replyTo.chatId = chatId;
-            replyTo.messageId = replyToMessageId;
+            // A null id means "post it, don't reply to anything" — unboxing it here threw
+            // an NPE before the message ever reached Telegram.
+            TdApi.InputMessageReplyToMessage replyTo = null;
+            if (replyToMessageId != null) {
+                replyTo = new TdApi.InputMessageReplyToMessage();
+                replyTo.chatId = chatId;
+                replyTo.messageId = replyToMessageId;
+            }
 
             TdApi.SendMessage request = new TdApi.SendMessage(
                 chatId,
                 0,      // message thread id
-                replyTo, // reply to specific message
+                replyTo, // reply to specific message, or null for a plain post
                 null,   // options
                 null,   // reply markup
                 content

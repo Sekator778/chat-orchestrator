@@ -284,3 +284,8 @@ databaseChangeLog:
   # max cap, proactive jitter) + guarded moves off old timing defaults (cs084)
   - include:
       file: db/changelog/changes/084-living-persona-timing-knobs.yaml
+
+  # Chats reserved for send/receive testing; /api/admin/test-chat refuses
+  # anything outside this list (cs085)
+  - include:
+      file: db/changelog/changes/085-test-chats.yaml
