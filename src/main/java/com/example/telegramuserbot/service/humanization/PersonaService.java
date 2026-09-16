@@ -44,7 +44,13 @@ public interface PersonaService {
      * to be loaded last.
      */
     String buildPersonaSystemPrompt(String basePrompt, String languageHint, String botId);
-    
+
+    /**
+     * Writing habits of one persona, read from its {@code metadata.style} block.
+     * Never null: a persona without metadata gets {@link PersonaStyle#defaults()}.
+     */
+    PersonaStyle resolveStyle(String botId, String languageHint);
+
     /**
      * Persona-appropriate canned response for a specific question type,
      * in the voice of the persona that is about to answer.
