@@ -3,7 +3,10 @@ package com.example.telegramuserbot.service.orchestration;
 import com.example.telegramuserbot.domain.ResponseTemplate;
 import com.example.telegramuserbot.domain.ResponseTone;
 import com.example.telegramuserbot.domain.LlmQueryPhase;
+import com.example.telegramuserbot.domain.LlmQueryStatus;
 import com.example.telegramuserbot.dto.ResponsePayload;
+import com.example.telegramuserbot.service.humanization.PersonaService;
+import com.example.telegramuserbot.service.humanization.PersonaStyle;
 import com.example.telegramuserbot.service.llm.dto.ApiMessage;
 import com.example.telegramuserbot.service.llm.conversation.LlmSpeakerContext;
 import com.example.telegramuserbot.service.orchestration.dto.EnhancedPromptRequest;
@@ -27,17 +30,20 @@ public class ConciseResponseHandler {
     private final LlmCallService llmCallService;
     private final PendingResponseCoordinator pendingResponseCoordinator;
     private final LlmTrackingFacade trackingFacade;
+    private final PersonaService personaService;
 
     public ConciseResponseHandler(PromptBuilder promptBuilder,
                                   ResponsePostProcessor responsePostProcessor,
                                   LlmCallService llmCallService,
                                   PendingResponseCoordinator pendingResponseCoordinator,
-                                  LlmTrackingFacade trackingFacade) {
+                                  LlmTrackingFacade trackingFacade,
+                                  PersonaService personaService) {
         this.promptBuilder = promptBuilder;
         this.responsePostProcessor = responsePostProcessor;
         this.llmCallService = llmCallService;
         this.pendingResponseCoordinator = pendingResponseCoordinator;
         this.trackingFacade = trackingFacade;
+        this.personaService = personaService;
     }
 
     public Mono<ResponsePayload> handle(long chatId, long triggeringMessageId, String rawText, BotContextResolver.ResolvedConfig cfg) {
@@ -102,8 +108,13 @@ public class ConciseResponseHandler {
                         Map.of("stage", "single")
                 )
                 .flatMap(content -> {
-                    String processed = responsePostProcessor.postProcess(content, template);
+                    String lang = cfg.config() != null ? cfg.config().getLanguage() : null;
+                    PersonaStyle style = personaService.resolveStyle(cfg.botInstanceId(), lang);
+                    String processed = responsePostProcessor.postProcess(content, template, lang, style);
                     llmCallService.logNormalizedIfChanged(chatId, "CONCISE", content, processed);
+                    if (processed == null || processed.isBlank()) {
+                        return skipSilently(chatId, tracker, "CONCISE humanizer вернул пустой текст (skip/aiTell)");
+                    }
                     return pendingResponseCoordinator.maybeQueuePending(chatId, triggeringMessageId, cfg, processed, tone, "CONCISE")
                             .flatMap(queued -> {
                                 Mono<Void> tracked = trackingFacade.markCompletedOrSkip(tracker, processed, queued);
@@ -113,5 +124,22 @@ public class ConciseResponseHandler {
                                 return tracked.thenReturn(ResponsePayload.ofConcise(processed, tone));
                             });
                 });
+    }
+
+    /**
+     * Человек, которому нечего сказать, молчит — никакой шаблонной фразы в чат.
+     * Запрос помечается SKIPPED, сообщение не отправляется. Зеркалит
+     * EnhancedSingleResponseHandler.skipSilently.
+     */
+    private Mono<ResponsePayload> skipSilently(long chatId,
+                                              com.example.telegramuserbot.service.tracking.LlmQueryTracker tracker,
+                                              String reason) {
+        log.warn("[Chat {}] {} — пропускаем отправку без fallback-фразы", chatId, reason);
+        if (tracker == null) {
+            return Mono.empty();
+        }
+        return tracker.markCompleted(LlmQueryStatus.SKIPPED, null, reason, null, false)
+                .onErrorResume(e -> Mono.empty())
+                .then(Mono.empty());
     }
 }
