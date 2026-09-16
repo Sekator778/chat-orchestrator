@@ -52,6 +52,20 @@ public interface TelegramMessageSender {
     Mono<TdApi.Message> send(String botId, Long chatId, Long replyToMessageId, String text);
 
     /**
+     * Sends text message using a specific persona's TDLib session, paced through
+     * {@link HumanSendPacer} (read/think delay, mandatory stagger, per-(chat,persona)
+     * minimum gap, repeating typing indicator) before the actual send.
+     *
+     * @param botId            the bot/persona instance ID
+     * @param chatId           target chat ID
+     * @param replyToMessageId ID of the message to reply to, or null to send standalone
+     * @param text             message text (may contain HTML)
+     * @param hints            pacing hints (persona index, decided delay floor, trigger length)
+     * @return mono with sent message details
+     */
+    Mono<TdApi.Message> sendPaced(String botId, Long chatId, Long replyToMessageId, String text, HumanSendPacer.PacingHints hints);
+
+    /**
      * Whether the given bot's client is in a FLOOD_WAIT backoff window (outbound sends
      * suppressed). Callers can skip expensive generation that would only be dropped at send.
      *

@@ -3,6 +3,7 @@ package com.example.telegramuserbot.service.queue;
 import com.example.telegramuserbot.domain.PendingResponse;
 import com.example.telegramuserbot.service.TelegramClientManager;
 import com.example.telegramuserbot.service.persistence.MessagePersistenceService;
+import com.example.telegramuserbot.service.publishing.HumanSendPacer;
 import com.example.telegramuserbot.service.safety.OutboundReplyGuard;
 import com.example.telegramuserbot.telegram.TelegramClientFacade;
 import it.tdlight.jni.TdApi;
@@ -44,6 +45,7 @@ public final class PendingResponseScheduler {
     private final TelegramClientManager telegramClientManager;
     private final MessagePersistenceService messagePersistenceService;
     private final OutboundReplyGuard outboundReplyGuard;
+    private final HumanSendPacer pacer;
 
     @Value("${pending-response.scheduler.send-concurrency:8}")
     private int sendConcurrency;
@@ -57,12 +59,14 @@ public final class PendingResponseScheduler {
             PendingResponseService pendingResponseService,
             TelegramClientManager telegramClientManager,
             MessagePersistenceService messagePersistenceService,
-            OutboundReplyGuard outboundReplyGuard
+            OutboundReplyGuard outboundReplyGuard,
+            HumanSendPacer pacer
     ) {
         this.pendingResponseService = pendingResponseService;
         this.telegramClientManager = telegramClientManager;
         this.messagePersistenceService = messagePersistenceService;
         this.outboundReplyGuard = outboundReplyGuard;
+        this.pacer = pacer;
     }
 
     /**
@@ -70,6 +74,11 @@ public final class PendingResponseScheduler {
      * 1) Marks responses that satisfied delay/reply requirements as eligible
      * 2) Sends all eligible responses
      * Runs every 30 seconds by default.
+     *
+     * <p>Claimed rows are grouped by (chatId,botInstanceId) and sent with {@code concatMap}
+     * WITHIN a group, so two queued replies of the same persona in the same chat go out one
+     * after another — never in the same second — while different chats/personas still run
+     * up to {@code sendConcurrency} groups in parallel.
      */
     @Scheduled(
             fixedDelayString = "${pending-response.scheduler.check-eligible-interval-ms:30000}",
@@ -86,7 +95,8 @@ public final class PendingResponseScheduler {
 
         pendingResponseService.findPendingThatReachedThreshold()
                 .thenMany(pendingResponseService.claimEligibleResponses(limit))
-                .flatMap(this::sendEligibleResponse, Math.max(1, sendConcurrency))
+                .groupBy(p -> p.getChatId() + "|" + p.getBotInstanceId())
+                .flatMap(group -> group.concatMap(this::sendEligibleResponse), Math.max(1, sendConcurrency))
                 .subscribeOn(Schedulers.boundedElastic())
                 .doFinally(signalType -> processing.set(false))
                 .subscribe(
@@ -115,7 +125,7 @@ public final class PendingResponseScheduler {
             return pendingResponseService.markAsExpiredById(pending.getId()).thenReturn(pending);
         }
 
-        return sendReply(client, chatId, pending.getTriggeringMessageId(), pending.getPreparedResponse())
+        return sendReply(client, botId, chatId, pending.getTriggeringMessageId(), pending.getPreparedResponse())
                 .flatMap(sentMessage -> messagePersistenceService.persistMessage(botId, chatId, sentMessage).thenReturn(sentMessage))
                 .flatMap(sentMessage -> {
                     log.info("📤 SENT OK: Pending response id={} sent as msgId={} to chat={} botId={}",
@@ -135,7 +145,7 @@ public final class PendingResponseScheduler {
                 });
     }
 
-    private Mono<TdApi.Message> sendReply(TelegramClientFacade client, Long chatId, Long replyToMessageId, String text) {
+    private Mono<TdApi.Message> sendReply(TelegramClientFacade client, String botId, Long chatId, Long replyToMessageId, String text) {
         if (text == null || text.isBlank()) {
             return Mono.empty();
         }
@@ -151,21 +161,26 @@ public final class PendingResponseScheduler {
             log.warn("⊘ OUTBOUND GUARD error (fail-closed) for chat={}: {}", chatId, guardError.getMessage());
             return Mono.empty();
         }
-        return Mono.<TdApi.Message>create(sink -> {
-            TdApi.InputMessageContent content = new TdApi.InputMessageText(new TdApi.FormattedText(text, null), null, false);
-            TdApi.InputMessageReplyToMessage replyTo = new TdApi.InputMessageReplyToMessage();
-            replyTo.chatId = chatId;
-            replyTo.messageId = replyToMessageId != null ? replyToMessageId : 0L;
-            TdApi.SendMessage request = new TdApi.SendMessage(chatId, 0, replyTo, null, null, content);
-            client.send(request, result -> {
-                if (result.isError()) {
-                    sink.error(new RuntimeException("Telegram API error: " + result.getError().message));
-                } else {
-                    sink.success(result.get());
-                }
-            });
-        }).timeout(Duration.ofSeconds(30), Mono.error(
-                new RuntimeException("Telegram send timed out after 30s (chatId=" + chatId + ")")));
+        // Pending-queue send: already waited out its own eligibility window, so pacing here
+        // only adds the mandatory stagger + per-(chat,persona) minimum gap and the typing cue.
+        HumanSendPacer.PacingHints hints = HumanSendPacer.PacingHints.queued(0);
+        return pacer.pace(botId, chatId, text, hints)
+                .then(Mono.<TdApi.Message>create(sink -> {
+                    TdApi.InputMessageContent content = new TdApi.InputMessageText(new TdApi.FormattedText(text, null), null, false);
+                    TdApi.InputMessageReplyToMessage replyTo = new TdApi.InputMessageReplyToMessage();
+                    replyTo.chatId = chatId;
+                    replyTo.messageId = replyToMessageId != null ? replyToMessageId : 0L;
+                    TdApi.SendMessage request = new TdApi.SendMessage(chatId, 0, replyTo, null, null, content);
+                    client.send(request, result -> {
+                        if (result.isError()) {
+                            sink.error(new RuntimeException("Telegram API error: " + result.getError().message));
+                        } else {
+                            sink.success(result.get());
+                        }
+                    });
+                }).timeout(Duration.ofSeconds(30), Mono.error(
+                        new RuntimeException("Telegram send timed out after 30s (chatId=" + chatId + ")"))))
+                .doOnNext(sentMessage -> pacer.markSent(botId, chatId));
     }
 
     /**
