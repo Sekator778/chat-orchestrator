@@ -130,6 +130,80 @@ class PersonaAddressResolverTest {
     }
 
     @Test
+    void ambiguousFirstNameMentionResolvesToNobody() {
+        // Two candidates share the resolved first name "Максим" — ambiguity resolves to
+        // "nobody addressed" rather than picking either one.
+        MessageEntity trigger = textTrigger("Максим, как сам?");
+        when(selfUserIdResolver.resolveSelfFirstName("bot-a")).thenReturn(Mono.just("Максим"));
+        when(selfUserIdResolver.resolveSelfFirstName("bot-b")).thenReturn(Mono.just("Максим"));
+
+        StepVerifier.create(resolver.resolveAddressed(trigger, CANDIDATES))
+                .assertNext(addressed -> org.assertj.core.api.Assertions.assertThat(addressed).isEmpty())
+                .verifyComplete();
+    }
+
+    @Test
+    void replyToOutgoingRowFromNonCandidateFallsThroughToMentionMatching() {
+        // The replied-to message was sent by some OTHER bot, not one of the current
+        // dispatch candidates — reply-to must not claim the match, and since the text
+        // carries no mention either, resolution falls all the way through to empty.
+        MessageEntity trigger = replyTrigger(42L);
+        trigger.setContent("just chatting, no mention here");
+        when(messageRepository.findByChatIdAndMessageId(CHAT_ID, 42L))
+                .thenReturn(Mono.just(outgoingRow("bot-c")));
+
+        StepVerifier.create(resolver.resolveAddressed(trigger, CANDIDATES))
+                .assertNext(addressed -> org.assertj.core.api.Assertions.assertThat(addressed).isEmpty())
+                .verifyComplete();
+    }
+
+    @Test
+    void replyToTakesPrecedenceOverASimultaneousMentionOfAnotherCandidate() {
+        // Replying to bot-a's message while also @mentioning bot-b in the same text:
+        // reply-to wins outright, mention matching is never even reached.
+        MessageEntity trigger = replyTrigger(42L);
+        trigger.setContent("@bob_bot взгляни, что думаешь?");
+        when(messageRepository.findByChatIdAndMessageId(CHAT_ID, 42L))
+                .thenReturn(Mono.just(outgoingRow("bot-a")));
+        lenient().when(selfUserIdResolver.resolveSelfUsername("bot-b")).thenReturn(Mono.just("bob_bot"));
+
+        StepVerifier.create(resolver.resolveAddressed(trigger, CANDIDATES))
+                .assertNext(addressed -> org.assertj.core.api.Assertions.assertThat(addressed).contains("bot-a"))
+                .verifyComplete();
+    }
+
+    @Test
+    void wholeHandleRuleRejectsMentionInsideALongerHandle() {
+        // "@alex" must not claim a message that only mentions "@alex_dev".
+        MessageEntity trigger = textTrigger("Привет, @alex_dev, как сам?");
+        when(selfUserIdResolver.resolveSelfUsername("bot-a")).thenReturn(Mono.just("alex"));
+
+        StepVerifier.create(resolver.resolveAddressed(trigger, CANDIDATES))
+                .assertNext(addressed -> org.assertj.core.api.Assertions.assertThat(addressed).isEmpty())
+                .verifyComplete();
+    }
+
+    @Test
+    void wholeHandleRuleAcceptsMentionFollowedByComma() {
+        MessageEntity trigger = textTrigger("До связи, @alex, как сам?");
+        when(selfUserIdResolver.resolveSelfUsername("bot-a")).thenReturn(Mono.just("alex"));
+
+        StepVerifier.create(resolver.resolveAddressed(trigger, CANDIDATES))
+                .assertNext(addressed -> org.assertj.core.api.Assertions.assertThat(addressed).contains("bot-a"))
+                .verifyComplete();
+    }
+
+    @Test
+    void wholeHandleRuleAcceptsMentionAtEndOfText() {
+        MessageEntity trigger = textTrigger("Слушай, зайди в чат @alex");
+        when(selfUserIdResolver.resolveSelfUsername("bot-a")).thenReturn(Mono.just("alex"));
+
+        StepVerifier.create(resolver.resolveAddressed(trigger, CANDIDATES))
+                .assertNext(addressed -> org.assertj.core.api.Assertions.assertThat(addressed).contains("bot-a"))
+                .verifyComplete();
+    }
+
+    @Test
     void repositoryErrorFailsOpenToNobodyAddressed() {
         MessageEntity trigger = replyTrigger(42L);
         when(messageRepository.findByChatIdAndMessageId(CHAT_ID, 42L))

@@ -38,7 +38,7 @@ The application is a Spring Boot microservice leveraging a reactive programming 
     *   `config`: Detailed management of chat configurations, templates, and rules.
     *   `decision`: Logic for deciding bot actions.
     *   `generation`: AI response generation.
-    *   `humanization`: Logic for making AI responses more human-like.
+    *   `humanization`: Persona identity, per-persona writing habits (`PersonaStyle`) and the language-aware `ReplyHumanizer` — see [docs/persona-humanization.md](docs/persona-humanization.md) for how a persona decides, writes and paces its replies.
     *   `llm`: Integration with Large Language Models (DeepSeek, Enhanced LLM, Humanized LLM).
     *   `orchestration`: Coordinating complex workflows.
     *   `persistence`: Managing data storage.

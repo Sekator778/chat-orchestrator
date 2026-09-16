@@ -3,7 +3,9 @@ package com.example.telegramuserbot.service.orchestration;
 import com.example.telegramuserbot.domain.ChatConfig;
 import com.example.telegramuserbot.domain.PendingResponse;
 import com.example.telegramuserbot.domain.PendingResponseStatus;
+import com.example.telegramuserbot.domain.ResponseStyle;
 import com.example.telegramuserbot.domain.ResponseTemplate;
+import com.example.telegramuserbot.domain.ResponseTone;
 import com.example.telegramuserbot.service.humanization.PersonaStyle;
 import com.example.telegramuserbot.service.llm.conversation.LlmSpeakerContext;
 import com.example.telegramuserbot.service.orchestration.dto.EnhancedPromptRequest;
@@ -173,5 +175,50 @@ class PersonaPromptComposerTest {
         String prompt = composer.compose(baseRequest("en").build(), "You are Nova, a crypto enthusiast.", PersonaStyle.defaults());
 
         assertThat(prompt).contains("You are Nova, a crypto enthusiast.");
+    }
+
+    // --- "how people write here" brevity clause follows style.maxSentences ---
+
+    private PersonaStyle styleWithMaxSentences(int maxSentences) {
+        return new PersonaStyle(maxSentences, PersonaStyle.EmojiUsage.RARE, false, true, 0.0, List.of(), List.of(), null);
+    }
+
+    @Test
+    void brevityClauseIsOneShortSentenceWhenMaxSentencesIsOne() {
+        String prompt = composer.compose(baseRequest("ru").build(), "Ты Нова.", styleWithMaxSentences(1));
+
+        assertThat(prompt).contains("Обычно одно короткое предложение");
+    }
+
+    @Test
+    void brevityClauseIsOneOrTwoWhenMaxSentencesIsTwo() {
+        String prompt = composer.compose(baseRequest("ru").build(), "Ты Нова.", styleWithMaxSentences(2));
+
+        assertThat(prompt).contains("Обычно одно-два коротких предложения");
+    }
+
+    @Test
+    void brevityClauseCapsAtMaxSentencesWhenGreaterThanTwo() {
+        // PersonaStyle clamps maxSentences to [1,4], so 4 is the highest reachable value.
+        String prompt = composer.compose(baseRequest("ru").build(), "Ты Нова.", styleWithMaxSentences(4));
+
+        assertThat(prompt).contains("Обычно не больше 4 коротких предложений");
+    }
+
+    // --- style/tone words are localized, not the English enum descriptions ---
+
+    @Test
+    void concreteCasualStyleAndToneAreLocalizedInARussianChat() {
+        ResponseTemplate template = new ResponseTemplate();
+        template.setResponseStyle(ResponseStyle.CONCISE);
+        template.setResponseTone(ResponseTone.CASUAL);
+
+        String prompt = composer.compose(baseRequest("ru").template(template).build(), "Ты Нова.", PersonaStyle.defaults());
+
+        assertThat(prompt).contains("коротко и по делу");
+        assertThat(prompt).contains("непринуждённый");
+        // Never the raw English enum descriptions leaking into a Russian prompt.
+        assertThat(prompt).doesNotContain("Brief and to-the-point");
+        assertThat(prompt).doesNotContain("Relaxed and informal");
     }
 }
