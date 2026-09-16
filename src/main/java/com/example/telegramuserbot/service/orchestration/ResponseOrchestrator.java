@@ -166,7 +166,7 @@ public class ResponseOrchestrator {
      * with optional shaping directives from the decision engine.
      * <p>
      * When directives is null behavior is byte-identical to the 5-arg overload.
-     * Directives are only applied when {@code bot.decision-gate.shape-replies=true}.
+     * Directives are only applied when {@code decision_gate.shape_replies=true} (bot.app_settings).
      *
      * @param directives nullable shaping directives from ResponseDecisionEngine.decide()
      */

@@ -23,6 +23,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import com.example.telegramuserbot.service.llm.conversation.LlmSpeakerContext;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
@@ -148,7 +149,17 @@ public final class ProactiveEngagementService {
                             ? ThreadLocalRandom.current().nextLong(0, jitterMaxMinutes * 60_000L)
                             : 0L;
                     Mono<Void> jitter = jitterMs > 0 ? Mono.delay(Duration.ofMillis(jitterMs)).then() : Mono.empty();
-                    return jitter.then(generateAndSendNow(engagement, anchorId, chatId, botId));
+                    // The jitter can be up to 20 minutes: re-check the window after it, the way
+                    // SiblingReplyService does after its own delay, so a persona whose day ends
+                    // inside the jitter does not post after bedtime.
+                    return jitter.then(personaScheduleService.isActiveNow(botId))
+                            .flatMap(stillActive -> {
+                                if (!stillActive) {
+                                    log.info("Proactive skip chatId={} botId={}: activity window closed during jitter", chatId, botId);
+                                    return Mono.<Void>empty();
+                                }
+                                return generateAndSendNow(engagement, anchorId, chatId, botId);
+                            });
                 })
                 .onErrorResume(ex -> {
                     log.error("Proactive send failed chatId={} botId={}: {}", chatId, botId, ex.getMessage());
@@ -176,6 +187,10 @@ public final class ProactiveEngagementService {
                                             .llmParameters(cfg.llmParameters())
                                             .fallbackPrompt("Respond naturally as yourself.")
                                             .fallbackLanguage(cfg.config() != null ? cfg.config().getLanguage() : "ru")
+                                            // Without a speaker context PromptBuilder falls back to the
+                                            // primary persona's identity and style — the wrong voice in
+                                            // every chat the primary is not posting in.
+                                            .speakerContext(new LlmSpeakerContext(botId, null, List.of()))
                                             .build();
 
                                     List<ApiMessage> messages = new ArrayList<>();
@@ -208,9 +223,11 @@ public final class ProactiveEngagementService {
                                                     log.info("Proactive skip chatId={} botId={}: post-processed reply is blank", chatId, botId);
                                                     return Mono.<Void>empty();
                                                 }
+                                                // No outer timeout: the paced send deliberately waits out the
+                                                // read/thinking/typing budget first; the TDLib round trip inside
+                                                // sendPaced carries its own 30 s timeout.
                                                 return messageSender.sendPaced(botId, chatId, null, text,
                                                                 HumanSendPacer.PacingHints.direct(0, null, lastInboundLength))
-                                                        .timeout(Duration.ofSeconds(30))
                                                         .flatMap(sent -> engagementRepository.markSent(
                                                                         engagement.getId(), Instant.now(), anchorId)
                                                                 .timeout(Duration.ofSeconds(5))

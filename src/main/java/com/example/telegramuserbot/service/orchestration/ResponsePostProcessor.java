@@ -22,7 +22,7 @@ public class ResponsePostProcessor {
 
     // Template-driven CONCISE trimming is stricter than a persona's own emoji style
     // (PersonaStyle.EmojiUsage), so it still runs its own pass on top of the humanizer.
-    private static final Pattern EMOJI_PATTERN = Pattern.compile("[\\x{1F600}-\\x{1F64F}]|[\\x{1F300}-\\x{1F5FF}]|[\\x{1F680}-\\x{1F6FF}]|[\\x{1F700}-\\x{1F77F}]|[\\x{1F780}-\\x{1F7FF}]|[\\x{1F800}-\\x{1F8FF}]|[\\x{2600}-\\x{26FF}]|[\\x{2700}-\\x{27BF}]");
+    private static final Pattern EMOJI_PATTERN = ReplyHumanizer.EMOJI_UNIT;
 
     private final ReplyHumanizer humanizer;
 

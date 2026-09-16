@@ -154,7 +154,7 @@ Notes:
 | novelty | Recency-based novelty score | DOUBLE PRECISION |
 | views / forwards | Channel metrics when available | BIGINT |
 
-## ✅ bot.response_variations
+## ⚪ bot.response_variations (orphaned 2026-09-16: no code reads or writes it — see persona-humanization.md)
 | Column | Purpose | Values |
 | --- | --- | --- |
 | id | PK | BIGSERIAL |
@@ -171,7 +171,7 @@ Notes:
 | requires_context | Whether extra context is needed | Default false |
 | created_at | Created timestamp | Default now |
 
-## ✅ bot.user_communication_profiles
+## ⚪ bot.user_communication_profiles (orphaned 2026-09-16: no code reads or writes it — see persona-humanization.md)
 | Column | Purpose | Values |
 | --- | --- | --- |
 | id | PK | BIGSERIAL |
