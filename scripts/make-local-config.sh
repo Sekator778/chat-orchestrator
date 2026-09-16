@@ -4,15 +4,17 @@
 # Why it exists: orchstack.sh exports .env.atlas into the JVM it launches, but
 # the IDE's Run button does not read that file — the app would come up with an
 # empty spring.r2dbc.username and die on "No value found for user". Spring Boot
-# reads ./config/application-local.yml on its own when the `local` profile is
-# active, so the IDE run config only has to name the profile.
+# always reads ./config/application.yml, whatever profile or run configuration
+# was used, so a plain Run on the Application class is enough. The file also
+# names the staging profile itself; env vars still outrank it, so the
+# orchstack.sh path is unchanged.
 #
 # The generated file holds real credentials and is gitignored.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
 ENV_FILE="docker/atlas/.env.atlas"
-OUT="config/application-local.yml"
+OUT="config/application.yml"
 
 [ -f "$ENV_FILE" ] || { echo "missing $ENV_FILE" >&2; exit 1; }
 
@@ -51,18 +53,16 @@ for a in accounts:
             f"      sessionsDirectory: \"{a['sessionsDirectory']}\"\n")
 
 pathlib.Path(out_path).parent.mkdir(exist_ok=True)
-pathlib.Path(out_path).write_text(f"""# Local run settings for the IDE (profile "local", loaded from ./config/).
+pathlib.Path(out_path).write_text(f"""# Local run settings for the IDE. Spring Boot reads ./config/application.yml on
+# every run, so the Run button needs no profile flag and no environment variables.
 # Gitignored: it holds real credentials. Mirrors docker/atlas/.env.atlas, which
-# only the orchstack.sh path reads. Regenerate with scripts/make-local-config.sh.
-
-server:
-  port: {g('SERVER_PORT', '8099')}
-
-app:
-  http:
-    enabled: {g('APP_HTTP_ENABLED', 'true')}
+# only the orchstack.sh path reads; env vars still outrank this file, so
+# orchstack.sh app start behaves exactly as before.
+# Regenerate with scripts/make-local-config.sh.
 
 spring:
+  profiles:
+    active: staging
   r2dbc:
     url: r2dbc:postgresql://{host}:{port}/{db}?schema=tgscan,bot,public
     username: {user}
@@ -73,6 +73,13 @@ spring:
     password: {password}
   kafka:
     bootstrap-servers: {g('KAFKA_BOOTSTRAP_SERVERS', '127.0.0.1:9094')}
+
+server:
+  port: {g('SERVER_PORT', '8099')}
+
+app:
+  http:
+    enabled: {g('APP_HTTP_ENABLED', 'true')}
 
 qdrant:
   url: {g('MEMO_QDRANT_URL', 'http://127.0.0.1:6335')}
