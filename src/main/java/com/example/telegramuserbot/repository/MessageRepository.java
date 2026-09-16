@@ -353,26 +353,33 @@ public interface MessageRepository extends R2dbcRepository<MessageEntity, Long> 
                                                    @Param("limit") int limit);
 
     /**
-     * Counts outgoing bot messages sent since the last inbound (non-outgoing) message before the given message_id.
-     * Used to enforce a per-post bot conversation chain length limit and prevent echo-chamber loops.
+     * Counts the bot messages sent since the last human message before {@code before}.
+     * Used to cap how many times personas may speak in a row on one post.
      *
-     * @param chatId           target chat
-     * @param currentMessageId the triggering message's message_id (exclusive upper bound)
+     * <p>Ordered by {@code date}, not {@code message_id}: TDLib hands every account its
+     * own local id for the same physical message, so a chat that several personas watch
+     * holds interleaved id ranges. Comparing ids there counted long-finished
+     * conversations as the current chain and silenced the chat for good — a message
+     * whose local id happened to be lower than yesterday's posts looked like the
+     * seventh bot message in a row.
+     *
+     * @param chatId target chat
+     * @param before the triggering message's timestamp (exclusive upper bound)
      */
     @Query("""
         SELECT COUNT(*) FROM bot.messages
         WHERE chat_id = :chatId
           AND is_outgoing = true
-          AND message_id > (
-              SELECT COALESCE(MAX(m2.message_id), 0) FROM bot.messages m2
+          AND date < :before
+          AND date > COALESCE((
+              SELECT MAX(m2.date) FROM bot.messages m2
               WHERE m2.chat_id = :chatId
                 AND m2.is_outgoing = false
-                AND m2.message_id < :currentMessageId
-          )
-          AND message_id < :currentMessageId
+                AND m2.date < :before
+          ), TIMESTAMP WITH TIME ZONE 'epoch')
     """)
     Mono<Long> countOutgoingMessagesSinceLastInbound(@Param("chatId") long chatId,
-                                                     @Param("currentMessageId") long currentMessageId);
+                                                     @Param("before") java.time.Instant before);
 
     // -------------------------------------------------------------------------
     // F3 keyword-backfill helpers
