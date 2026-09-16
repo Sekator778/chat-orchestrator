@@ -35,8 +35,6 @@ llm:
   service:
     enhanced:
       enabled: true        # Enable enhanced LLM service with templates and personalization
-    humanization:
-      enabled: ${LLM_HUMANIZATION_ENABLED:true}
     multiStage:
       enabled: ${LLM_MULTI_STAGE_ENABLED:true}
 
@@ -50,28 +48,12 @@ telegram:
 
 bot:
   persona-ids: "[2000000001]"
-  # Human-like reply timing. random-delay.max-ms <= 0 keeps the legacy typing-only
-  # behavior; set it > 0 to add a random, per-persona-staggered pre-send delay for
-  # the test chat only (test-chat-id). Other chats are never affected.
-  reply-timing:
-    test-chat-id: ${BOT_REPLY_TIMING_TEST_CHAT_ID:-4964162923}
-    typing:
-      ms-per-char: ${BOT_REPLY_TYPING_MS_PER_CHAR:60}
-      cap-ms: ${BOT_REPLY_TYPING_CAP_MS:8000}
-    random-delay:
-      min-ms: ${BOT_REPLY_RANDOM_DELAY_MIN_MS:0}
-      max-ms: ${BOT_REPLY_RANDOM_DELAY_MAX_MS:0}
-    stagger:
-      step-ms: ${BOT_REPLY_STAGGER_STEP_MS:3000}
-  # ResponseDecisionEngine gate — all flags OFF by default (zero runtime change until enabled).
-  # enabled:          run analyze()+decide() before persona fan-out; mute on shouldRespond=false
-  # shape-replies:    apply tone/length/intent/delay directives from decision into the prompt
-  # fail-open:        on analyze/decide error or empty context → PROCEED (mute-averse)
-  # cooldown-enabled: allow bot-detection to auto-activate mute-cooldown (landmine guard)
+  # Reply timing is DB-backed now: bot.app_settings reply_timing.* (read via AppSettingsService),
+  # not this file — the old reply-timing.* block here had no Java consumer and was deleted.
+  # ResponseDecisionEngine gate — cooldown-enabled is the one flag still read from here (@Value);
+  # enabled/shape-replies/fail-open are DB-backed (bot.app_settings decision_gate.*) and had no
+  # Java consumer under this key, so that dead trio was deleted.
   decision-gate:
-    enabled: ${BOT_DECISION_GATE_ENABLED:false}
-    shape-replies: ${BOT_DECISION_GATE_SHAPE_REPLIES:false}
-    fail-open: ${BOT_DECISION_GATE_FAIL_OPEN:true}
     cooldown-enabled: ${BOT_DECISION_GATE_COOLDOWN_ENABLED:false}
 
 # TDLib Configuration
@@ -158,32 +140,9 @@ logging:
     io.r2dbc.pool: WARN
     org.springframework.kafka.listener.KafkaMessageListenerContainer: ${LOG_LEVEL_KAFKA:ERROR}
 
-# Humanization Configuration
-humanization:
-  # Anti-detection settings
-  anti-detection:
-    enabled: ${HUMANIZATION_ANTI_DETECTION_ENABLED:true}
-    emergency-threshold: ${HUMANIZATION_EMERGENCY_THRESHOLD:0.7}
-    pattern-reset-interval: ${HUMANIZATION_PATTERN_RESET_INTERVAL:24h}
-
-  # Response timing settings
-  timing:
-    min-delay: ${HUMANIZATION_MIN_DELAY:1000}
-    max-delay: ${HUMANIZATION_MAX_DELAY:8000}
-    typing-speed: ${HUMANIZATION_TYPING_SPEED:50}  # ms per character
-    variation-factor: ${HUMANIZATION_VARIATION_FACTOR:0.3}
-
-  # User profiling settings
-  profiling:
-    min-messages-for-reliability: ${HUMANIZATION_MIN_MESSAGES:10}
-    confidence-threshold: ${HUMANIZATION_CONFIDENCE_THRESHOLD:0.2}
-    profile-update-enabled: ${HUMANIZATION_PROFILE_UPDATE:true}
-
-  # Response variation settings
-  variations:
-    weight-randomization: ${HUMANIZATION_WEIGHT_RANDOMIZATION:true}
-    usage-tracking: ${HUMANIZATION_USAGE_TRACKING:true}
-    max-recent-usage-hours: ${HUMANIZATION_MAX_RECENT_HOURS:1}
+# The old anti-detection/timing/profiling/variations `humanization:` block lived here —
+# zero Java consumers (AntiDetectionService et al. are decommissioned); see ReplyHumanizer
+# for the language-aware humanizer that replaces it.
 
 # Startup Chat Synchronization Configuration
 startup:
@@ -272,7 +231,6 @@ pending-response:
     check-eligible-interval-ms: ${PENDING_RESPONSE_CHECK_INTERVAL:30000}  # 30 seconds - check for eligible responses
     mark-expired-interval-ms: ${PENDING_RESPONSE_EXPIRE_INTERVAL:300000}  # 5 minutes - mark expired responses
     cleanup-interval-ms: ${PENDING_RESPONSE_CLEANUP_INTERVAL:3600000}     # 1 hour - cleanup expired from DB
-    check-threshold-interval-ms: ${PENDING_RESPONSE_THRESHOLD_INTERVAL:60000}  # 1 minute - check threshold reached
 
 # Message Clustering Configuration
 clustering:

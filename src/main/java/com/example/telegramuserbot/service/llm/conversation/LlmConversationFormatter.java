@@ -1,6 +1,5 @@
 package com.example.telegramuserbot.service.llm.conversation;
 
-import com.example.telegramuserbot.domain.MediaKind;
 import com.example.telegramuserbot.domain.MessageEntity;
 import com.example.telegramuserbot.service.llm.dto.ApiMessage;
 import org.springframework.stereotype.Service;
@@ -31,15 +30,6 @@ public final class LlmConversationFormatter implements ConversationFormatter {
                                MessageEntity triggeringMessage,
                                String botInstanceId,
                                Long selfTelegramUserId) {
-        return format(contextMessages, triggeringMessage, botInstanceId, selfTelegramUserId, false);
-    }
-
-    @Override
-    public FormatResult format(List<MessageEntity> contextMessages,
-                               MessageEntity triggeringMessage,
-                               String botInstanceId,
-                               Long selfTelegramUserId,
-                               boolean includeMediaPlaceholders) {
         List<MessageEntity> sequence = new ArrayList<>();
         if (contextMessages != null) {
             sequence.addAll(contextMessages);
@@ -60,11 +50,9 @@ public final class LlmConversationFormatter implements ConversationFormatter {
             // Media-only posts (e.g. a chart photo) carry their text in caption, not content.
             // Fall back to caption so a captioned forward becomes a real user turn instead of
             // being dropped as blank — which previously starved the LLM into a "Ок." filler.
-            String textContent = message.getContent() != null && !message.getContent().isBlank()
+            String combinedContent = message.getContent() != null && !message.getContent().isBlank()
                     ? message.getContent()
                     : (message.getCaption() != null ? message.getCaption() : "");
-            String mediaPlaceholder = includeMediaPlaceholders ? generateMediaPlaceholder(message) : "";
-            String combinedContent = combineContentAndPlaceholder(textContent, mediaPlaceholder);
             if (combinedContent.isBlank()) {
                 continue;
             }
@@ -93,36 +81,6 @@ public final class LlmConversationFormatter implements ConversationFormatter {
             return false;
         }
         return !message.getMessageType().isIncludedInLlmConversation();
-    }
-
-    private String generateMediaPlaceholder(MessageEntity message) {
-        if (message.getMediaType() == null || message.getMediaType() == MediaKind.UNKNOWN) {
-            return "";
-        }
-        return switch (message.getMediaType()) {
-            case PHOTO -> "[Фото]";
-            case VIDEO -> "[Відео]";
-            case VOICE -> "[Голосове повідомлення]";
-            case AUDIO -> "[Аудіо]";
-            case DOCUMENT -> "[Документ]";
-            case STICKER -> "[Стікер]";
-            case ANIMATION -> "[Анімація]";
-            case VIDEO_NOTE -> "[Відео-повідомлення]";
-            default -> "";
-        };
-    }
-
-    private String combineContentAndPlaceholder(String text, String placeholder) {
-        boolean hasText = text != null && !text.isBlank();
-        boolean hasPlaceholder = placeholder != null && !placeholder.isBlank();
-        if (hasText && hasPlaceholder) {
-            return text + "\n" + placeholder;
-        } else if (hasText) {
-            return text;
-        } else if (hasPlaceholder) {
-            return placeholder;
-        }
-        return "";
     }
 
     private String formatContentWithText(String combinedContent, Speaker speaker, MessageEntity message) {
