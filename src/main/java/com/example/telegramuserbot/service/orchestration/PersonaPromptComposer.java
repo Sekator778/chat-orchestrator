@@ -3,7 +3,9 @@ package com.example.telegramuserbot.service.orchestration;
 import com.example.telegramuserbot.domain.ChatConfig;
 import com.example.telegramuserbot.domain.PendingResponse;
 import com.example.telegramuserbot.domain.ResponseLength;
+import com.example.telegramuserbot.domain.ResponseStyle;
 import com.example.telegramuserbot.domain.ResponseTemplate;
+import com.example.telegramuserbot.domain.ResponseTone;
 import com.example.telegramuserbot.service.common.ReplyLanguage;
 import com.example.telegramuserbot.service.humanization.PersonaStyle;
 import com.example.telegramuserbot.service.llm.conversation.LlmSpeakerContext;
@@ -41,7 +43,9 @@ public class PersonaPromptComposer {
     private final Clock clock;
 
     public PersonaPromptComposer() {
-        this(Clock.systemUTC());
+        // The stand's wall clock is the persona's default "where I am"; a persona with
+        // its own metadata.style.timezone overrides it in nowLine().
+        this(Clock.systemDefaultZone());
     }
 
     PersonaPromptComposer(Clock clock) {
@@ -152,10 +156,11 @@ public class PersonaPromptComposer {
         ResponseDirectives directives = request.directives();
 
         String styleDesc = template != null && template.getResponseStyle() != null
-                ? template.getResponseStyle().getDescription() : null;
-        String toneDesc = directives != null && directives.tone() != null
-                ? directives.tone().getDescription()
-                : (template != null && template.getResponseTone() != null ? template.getResponseTone().getDescription() : null);
+                ? styleWords(template.getResponseStyle(), lang) : null;
+        ResponseTone tone = directives != null && directives.tone() != null
+                ? directives.tone()
+                : (template != null ? template.getResponseTone() : null);
+        String toneDesc = tone != null ? toneWords(tone, lang) : null;
         Integer cap = directives != null && directives.length() != null
                 ? mapLengthToCap(directives.length())
                 : (template != null ? template.getMaxResponseLength() : null);
@@ -190,6 +195,37 @@ public class PersonaPromptComposer {
             sb.append(pick(lang, "Задача: ", "Завдання: ", "Intent: ")).append(intent).append(".");
         }
         return sb.toString().strip();
+    }
+
+    // The enum descriptions are English; a Russian prompt must not switch language mid-sentence.
+    private String styleWords(ResponseStyle style, String lang) {
+        return switch (style) {
+            case CONCISE -> pick(lang, "коротко и по делу", "коротко і по суті", "brief and to the point");
+            case INFORMATIVE -> pick(lang, "по фактам", "по фактах", "factual");
+            case CONVERSATIONAL -> pick(lang, "разговорно", "розмовно", "conversational");
+            case DETAILED -> pick(lang, "подробно", "докладно", "detailed");
+            case CREATIVE -> pick(lang, "с выдумкой", "з вигадкою", "creative");
+            case ANALYTICAL -> pick(lang, "по-аналитически", "аналітично", "analytical");
+            case EMPATHETIC -> pick(lang, "с эмпатией", "з емпатією", "empathetic");
+            case INSTRUCTIONAL -> pick(lang, "объясняя", "пояснюючи", "instructional");
+            case STORYTELLING -> pick(lang, "как историю", "як історію", "as a story");
+            default -> pick(lang, "по ситуации", "за ситуацією", "adaptive");
+        };
+    }
+
+    private String toneWords(ResponseTone tone, String lang) {
+        return switch (tone) {
+            case FRIENDLY -> pick(lang, "дружелюбный", "дружній", "friendly");
+            case FORMAL -> pick(lang, "формальный", "формальний", "formal");
+            case CASUAL -> pick(lang, "непринуждённый", "невимушений", "casual");
+            case ENTHUSIASTIC -> pick(lang, "воодушевлённый", "захоплений", "enthusiastic");
+            case CALM -> pick(lang, "спокойный", "спокійний", "calm");
+            case CONFIDENT -> pick(lang, "уверенный", "впевнений", "confident");
+            case HUMBLE -> pick(lang, "скромный", "скромний", "humble");
+            case PLAYFUL -> pick(lang, "игривый", "грайливий", "playful");
+            case SERIOUS -> pick(lang, "серьёзный", "серйозний", "serious");
+            default -> pick(lang, "нейтральный", "нейтральний", "neutral");
+        };
     }
 
     private Integer mapLengthToCap(ResponseLength length) {

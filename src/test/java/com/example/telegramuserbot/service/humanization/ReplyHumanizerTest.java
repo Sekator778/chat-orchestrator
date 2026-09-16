@@ -307,4 +307,19 @@ class ReplyHumanizerTest {
         assertThat(result.aiTell()).isFalse();
         assertThat(result.text()).isEqualTo(raw.trim());
     }
+
+    @Test
+    void skipTokenFollowedByAnExplanationIsStillSilence() {
+        ReplyHumanizer.Humanized result = humanizer(0.99).humanize("[SKIP] — мне тут нечего добавить", "ru", PersonaStyle.defaults());
+
+        assertThat(result.skip()).isTrue();
+        assertThat(result.text()).isEmpty();
+    }
+
+    @Test
+    void skipLookalikeInsideAWordIsNotSilence() {
+        ReplyHumanizer.Humanized result = humanizer(0.99).humanize("[skip]ped the meeting, sorry", "en", PersonaStyle.defaults());
+
+        assertThat(result.skip()).isFalse();
+    }
 }

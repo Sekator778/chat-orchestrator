@@ -29,6 +29,7 @@ public class ReplyHumanizer {
     // The prompt instructs the model to answer with exactly this token when it has
     // nothing worth saying — a human who has nothing to add stays quiet.
     private static final Set<String> SILENCE_TOKENS = Set.of("[SKIP]", "SKIP", "[skip]");
+    private static final Pattern SILENCE_PREFIX = Pattern.compile("^\\[skip\\](?![\\p{L}\\p{N}])", Pattern.CASE_INSENSITIVE);
 
     private static final Pattern LEADING_ROLE_PREFIX =
             Pattern.compile("^\\s*(?:ASSISTANT|USER|SYSTEM)\\s*[:\\-—]\\s*", Pattern.CASE_INSENSITIVE);
@@ -97,7 +98,9 @@ public class ReplyHumanizer {
 
         String trimmedRaw = raw.trim();
         String firstLine = trimmedRaw.split("\\R", 2)[0].trim();
-        if (SILENCE_TOKENS.contains(trimmedRaw) || SILENCE_TOKENS.contains(firstLine)) {
+        if (SILENCE_TOKENS.contains(trimmedRaw) || SILENCE_TOKENS.contains(firstLine)
+                || SILENCE_PREFIX.matcher(trimmedRaw).find()) {
+            // "[SKIP] — мне нечего добавить": the model sometimes explains its silence; still silence.
             return new Humanized("", true, false);
         }
 

@@ -25,12 +25,11 @@ app:
   http:
     enabled: ${APP_HTTP_ENABLED:true}
 
-# Decision gate ON for staging: every inbound message goes through analyze →
-# decide before persona fan-out (fail-open; reply shaping stays off until it
-# proves itself). Flip off via env if the stand must mimic legacy behavior.
+# Decision gate on/off, fail-open and reply shaping are DB-backed
+# (bot.app_settings decision_gate.*); the only flag still read from here is
+# cooldown-enabled.
 bot:
   decision-gate:
-    enabled: ${BOT_DECISION_GATE_ENABLED:true}
     # Deflect-then-silence ON: first "ты бот" accusation is laughed off,
     # a repeat within the strike window silences the chat for the cooldown.
     cooldown-enabled: ${BOT_DECISION_GATE_COOLDOWN_ENABLED:true}
