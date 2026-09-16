@@ -2,30 +2,58 @@ package com.example.telegramuserbot.service.orchestration;
 
 import com.example.telegramuserbot.domain.ResponseStyle;
 import com.example.telegramuserbot.domain.ResponseTemplate;
-import com.example.telegramuserbot.util.MarkdownStripper;
+import com.example.telegramuserbot.service.humanization.PersonaStyle;
+import com.example.telegramuserbot.service.humanization.ReplyHumanizer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
-import java.util.List;
 import java.util.Optional;
 import java.util.regex.Pattern;
 
 /**
- * Постобработка ответа: лёгкая персонализация и соблюдение стиля/длины.
+ * Постобработка ответа: соблюдение стиля/длины поверх ReplyHumanizer.
  * Упрощённая версия старых Personalization/ResponseProcessing сервисов.
  */
 @Component
 public class ResponsePostProcessor {
 
-    private static final Pattern EMOJI_PATTERN = Pattern.compile("[\\x{1F600}-\\x{1F64F}]|[\\x{1F300}-\\x{1F5FF}]|[\\x{1F680}-\\x{1F6FF}]|[\\x{1F700}-\\x{1F77F}]|[\\x{1F780}-\\x{1F7FF}]|[\\x{1F800}-\\x{1F8FF}]|[\\x{2600}-\\x{26FF}]|[\\x{2700}-\\x{27BF}]");
-    private static final Pattern LEADING_ROLE_PREFIX = Pattern.compile("^\\s*(?:ASSISTANT|USER|SYSTEM)\\s*[:\\-—]\\s*", Pattern.CASE_INSENSITIVE);
-    private static final Pattern LEADING_SPEAKER_PREFIX = Pattern.compile("^\\s*(?:ME|P\\d+|UNKNOWN)(?:\\s*\\([^)]*\\))?\\s*[:\\-—]\\s*", Pattern.CASE_INSENSITIVE);
+    private static final Logger log = LoggerFactory.getLogger(ResponsePostProcessor.class);
 
+    // Template-driven CONCISE trimming is stricter than a persona's own emoji style
+    // (PersonaStyle.EmojiUsage), so it still runs its own pass on top of the humanizer.
+    private static final Pattern EMOJI_PATTERN = ReplyHumanizer.EMOJI_UNIT;
+
+    private final ReplyHumanizer humanizer;
+
+    public ResponsePostProcessor(ReplyHumanizer humanizer) {
+        this.humanizer = humanizer;
+    }
+
+    /**
+     * Legacy entry point (no language/style context) — used by proactive posting and
+     * sibling replies, which run outside the per-persona reply pipeline.
+     */
     public String postProcess(String content, ResponseTemplate template) {
+        return postProcess(content, template, "auto", PersonaStyle.defaults());
+    }
+
+    public String postProcess(String content, ResponseTemplate template, String languageHint, PersonaStyle style) {
         if (content == null || content.isBlank()) {
             return content;
         }
 
-        String processed = stripSpeakerPrefixes(content.trim());
+        ReplyHumanizer.Humanized humanized = humanizer.humanize(content, languageHint, style != null ? style : PersonaStyle.defaults());
+        if (humanized.skip()) {
+            log.info("ResponsePostProcessor: staying silent — humanizer reported nothing worth sending");
+            return "";
+        }
+        if (humanized.aiTell()) {
+            log.warn("ResponsePostProcessor: reply still reads as AI-written after cleanup — staying silent");
+            return "";
+        }
+
+        String processed = humanized.text();
 
         // Respect max length if defined — cut at last sentence boundary before limit
         Integer maxLen = Optional.ofNullable(template).map(ResponseTemplate::getMaxResponseLength).orElse(null);
@@ -39,28 +67,7 @@ public class ResponsePostProcessor {
             processed = keepShort(processed);
         }
 
-        // Strip any Markdown emphasis the LLM may have emitted — messages are sent as plain text
-        // so literal asterisks, underscores, backticks and heading chars would be visible to users.
-        processed = MarkdownStripper.stripToPlainText(processed);
-
         return processed;
-    }
-
-    private String stripSpeakerPrefixes(String text) {
-        if (text == null || text.isBlank()) {
-            return text;
-        }
-        String[] lines = text.split("\\R", -1);
-        for (int i = 0; i < lines.length; i++) {
-            String line = lines[i];
-            if (line == null || line.isBlank()) {
-                continue;
-            }
-            line = LEADING_ROLE_PREFIX.matcher(line).replaceFirst("");
-            line = LEADING_SPEAKER_PREFIX.matcher(line).replaceFirst("");
-            lines[i] = line;
-        }
-        return String.join("\n", lines).trim();
     }
 
     private String removeExcessEmojis(String text) {

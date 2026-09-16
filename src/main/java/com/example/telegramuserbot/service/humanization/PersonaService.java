@@ -15,27 +15,7 @@ public interface PersonaService {
      * explicitly rather than by accident.
      */
     String getBotName(String botId);
-    
-    /**
-     * Full identity description of one persona.
-     */
-    String getBotIdentity(String botId);
-    
-    /**
-     * Response for "who are you" questions, in one persona's voice.
-     */
-    String getAboutSelfResponse(String botId);
-    
-    /**
-     * Response for photo requests, in one persona's voice.
-     */
-    String getPhotoRefusalResponse(String botId);
-    
-    /**
-     * Response about capabilities, in one persona's voice.
-     */
-    String getCapabilitiesResponse(String botId);
-    
+
     /**
      * Build the persona-enhanced system prompt for one bot persona.
      * <p>
@@ -44,10 +24,10 @@ public interface PersonaService {
      * to be loaded last.
      */
     String buildPersonaSystemPrompt(String basePrompt, String languageHint, String botId);
-    
+
     /**
-     * Persona-appropriate canned response for a specific question type,
-     * in the voice of the persona that is about to answer.
+     * Writing habits of one persona, read from its {@code metadata.style} block.
+     * Never null: a persona without metadata gets {@link PersonaStyle#defaults()}.
      */
-    String getPersonaResponse(String userQuestion, String botId);
+    PersonaStyle resolveStyle(String botId, String languageHint);
 }

@@ -166,7 +166,7 @@ public class ResponseOrchestrator {
      * with optional shaping directives from the decision engine.
      * <p>
      * When directives is null behavior is byte-identical to the 5-arg overload.
-     * Directives are only applied when {@code bot.decision-gate.shape-replies=true}.
+     * Directives are only applied when {@code decision_gate.shape_replies=true} (bot.app_settings).
      *
      * @param directives nullable shaping directives from ResponseDecisionEngine.decide()
      */
@@ -294,60 +294,6 @@ public class ResponseOrchestrator {
                     logLlmRequest(chatId, pipelineLabel, finalMessages, context, cfg.template(), cfg.config(), speakers, pending != null ? pending.size() : 0);
                     return finalMessages;
                 });
-    }
-
-    private Mono<Boolean> maybeQueuePending(long chatId,
-                                            long triggeringMessageId,
-                                            BotContextResolver.ResolvedConfig cfg,
-                                            String preparedContent,
-                                            ResponseTone tone,
-                                            String responseIntent) {
-        ChatConfig chatConfig = cfg.config();
-        int requiredDelta = chatConfig != null && chatConfig.getWaitForHumanRepliesCount() != null
-                ? chatConfig.getWaitForHumanRepliesCount()
-                : -1;
-        int delaySeconds = cfg.rateLimits() != null && cfg.rateLimits().getPendingResponseDelaySeconds() != null
-                ? cfg.rateLimits().getPendingResponseDelaySeconds()
-                : 0;
-
-        if (requiredDelta < 0) {
-            return Mono.just(false);
-        }
-
-        delaySeconds = Math.max(0, delaySeconds);
-        boolean shouldQueue = requiredDelta > 0 || delaySeconds > 0;
-        if (!shouldQueue) {
-            return Mono.just(false);
-        }
-
-        Instant eligibleAt = delaySeconds > 0 ? Instant.now().plusSeconds(delaySeconds) : Instant.now();
-
-	        String responseLength = Optional.ofNullable(cfg.template())
-	                .map(ResponseTemplate::getResponseStyle)
-	                .map(Enum::name)
-	                .orElse(null);
-	        String toneName = tone != null ? tone.name() : null;
-
-            String botInstanceId = cfg != null ? cfg.botInstanceId() : null;
-            if (botInstanceId == null || botInstanceId.isBlank()) {
-                return Mono.just(false);
-            }
-
-	        return pendingResponseService.enqueue(
-	                        chatId,
-	                        triggeringMessageId,
-                            botInstanceId,
-	                        preparedContent,
-	                        responseIntent,
-	                        toneName,
-	                        responseLength,
-	                        requiredDelta,
-	                        eligibleAt)
-                .doOnSuccess(p -> log.info("[Chat {}] Очередь: откладываем ответ (pending id={}, requiredDelta={}, eligibleAt={})",
-                        chatId, p.getId(), requiredDelta, eligibleAt))
-                .doOnError(err -> log.error("[Chat {}] Очередь: не удалось сохранить отложенный ответ: {}", chatId, err.getMessage(), err))
-                .map(p -> true)
-                .onErrorReturn(false);
     }
 
     private void logLlmRequest(long chatId,
