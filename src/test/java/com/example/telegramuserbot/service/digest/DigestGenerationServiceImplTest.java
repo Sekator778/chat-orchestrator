@@ -63,10 +63,7 @@ final class DigestGenerationServiceImplTest {
     private com.example.telegramuserbot.service.humanization.PersonaService personaService;
 
     @Mock
-    private com.example.telegramuserbot.service.humanization.AntiDetectionService antiDetectionService;
-
-    @Mock
-    private com.example.telegramuserbot.service.humanization.ResponseRefinerService responseRefinerService;
+    private com.example.telegramuserbot.service.humanization.ReplyHumanizer replyHumanizer;
 
     private DigestGenerationServiceImpl service;
 
@@ -77,17 +74,13 @@ final class DigestGenerationServiceImplTest {
                 org.mockito.ArgumentMatchers.anyString(),
                 org.mockito.ArgumentMatchers.any()))
                 .thenAnswer(inv -> inv.getArgument(0));
-        org.mockito.Mockito.when(antiDetectionService.analyzeAndAdjustResponse(
+        // Pass-through humanizer: these tests assert on the raw LLM text, so keep it unchanged.
+        org.mockito.Mockito.when(replyHumanizer.humanize(
                 org.mockito.ArgumentMatchers.anyString(),
                 org.mockito.ArgumentMatchers.any(),
                 org.mockito.ArgumentMatchers.any()))
-                .thenAnswer(inv -> reactor.core.publisher.Mono.just(inv.getArgument(0)));
-        org.mockito.Mockito.when(antiDetectionService.hasAiPatterns(org.mockito.ArgumentMatchers.anyString()))
-                .thenReturn(false);
-        org.mockito.Mockito.when(antiDetectionService.addStrategicImperfections(
-                org.mockito.ArgumentMatchers.anyString(),
-                org.mockito.ArgumentMatchers.anyDouble()))
-                .thenAnswer(inv -> inv.getArgument(0));
+                .thenAnswer(inv -> new com.example.telegramuserbot.service.humanization.ReplyHumanizer.Humanized(
+                        inv.getArgument(0), false, false));
         // The production generateDigest path always records the run via
         // updateLastRunAt(...).timeout(...) — even when no messages are found —
         // so stub it for every test (LENIENT strictness swallows the unused case).
@@ -100,8 +93,7 @@ final class DigestGenerationServiceImplTest {
                 sourceTrustRepository,
                 deepSeekApiClient,
                 personaService,
-                antiDetectionService,
-                responseRefinerService
+                replyHumanizer
         );
         Field defaultModelField = DigestGenerationServiceImpl.class.getDeclaredField("defaultModel");
         defaultModelField.setAccessible(true);

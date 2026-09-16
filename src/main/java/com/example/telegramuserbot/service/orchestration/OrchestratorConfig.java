@@ -1,5 +1,6 @@
 package com.example.telegramuserbot.service.orchestration;
 
+import com.example.telegramuserbot.service.humanization.ReplyHumanizer;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -12,8 +13,8 @@ public class OrchestratorConfig {
 
     @Bean
     @ConditionalOnMissingBean
-    public ResponsePostProcessor responsePostProcessor() {
-        return new ResponsePostProcessor();
+    public ResponsePostProcessor responsePostProcessor(ReplyHumanizer replyHumanizer) {
+        return new ResponsePostProcessor(replyHumanizer);
     }
 }
 
