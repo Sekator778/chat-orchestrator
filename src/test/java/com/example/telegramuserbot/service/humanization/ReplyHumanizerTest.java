@@ -322,4 +322,121 @@ class ReplyHumanizerTest {
 
         assertThat(result.skip()).isFalse();
     }
+
+    // --- aiTell regressions: "assistant" alone must not fire the RU/UK tells ---
+
+    @Test
+    void directorsAssistantIsNotAnAiTellInRussian() {
+        Humanized result = humanizer(0.9).humanize(
+                "Я ассистент режиссёра, могу помочь с расписанием", "ru", QUIET_STYLE);
+        assertThat(result.aiTell()).isFalse();
+    }
+
+    @Test
+    void aiAssistantWithHyphenIsAnAiTellInRussian() {
+        Humanized result = humanizer(0.9).humanize("Я ИИ-ассистент", "ru", QUIET_STYLE);
+        assertThat(result.aiTell()).isTrue();
+    }
+
+    @Test
+    void projectAssistantIsNotAnAiTellInUkrainian() {
+        Humanized result = humanizer(0.9).humanize("Я тут як асистент проєкту", "uk", QUIET_STYLE);
+        assertThat(result.aiTell()).isFalse();
+    }
+
+    @Test
+    void artificialIntelligenceIsAnAiTellInUkrainian() {
+        Humanized result = humanizer(0.9).humanize("Я штучний інтелект", "uk", QUIET_STYLE);
+        assertThat(result.aiTell()).isTrue();
+    }
+
+    @Test
+    void gptIsALanguageModelStatementAboutSomethingElseIsNotAnAiTell() {
+        Humanized result = humanizer(0.9).humanize("GPT is a language model, not magic", "en", QUIET_STYLE);
+        assertThat(result.aiTell()).isFalse();
+    }
+
+    @Test
+    void selfDescribingAsALanguageModelIsAnAiTell() {
+        Humanized result = humanizer(0.9).humanize("I'm just a language model", "en", QUIET_STYLE);
+        assertThat(result.aiTell()).isTrue();
+    }
+
+    // --- trailing offer removal: only a short canned closing sentence goes ---
+
+    @Test
+    void shortTrailingOfferSentenceIsRemoved() {
+        Humanized result = humanizer(0.9).humanize(
+                "Просто зайди на сайт. Обращайтесь, если что.", "ru", QUIET_STYLE);
+        assertThat(result.text()).isEqualTo("Просто зайди на сайт.");
+    }
+
+    @Test
+    void trailingSentenceWithRealContentIsNotRemovedEvenIfItStartsLikeAnOffer() {
+        Humanized result = humanizer(0.9).humanize(
+                "Просто зайди на сайт посольства. Обращайтесь в приёмные часы с 9 до 17.", "ru", QUIET_STYLE);
+        assertThat(result.text()).isEqualTo("Просто зайди на сайт посольства. Обращайтесь в приёмные часы с 9 до 17.");
+    }
+
+    @Test
+    void singleSentenceOfferLookalikeIsNeverEmptiedEvenAsTheOnlySentence() {
+        Humanized result = humanizer(0.9).humanize("Надеюсь, это поможет", "ru", QUIET_STYLE);
+        assertThat(result.skip()).isFalse();
+        assertThat(result.text()).isEqualTo("Надеюсь, это поможет");
+    }
+
+    // --- dash moderation regressions ---
+
+    @Test
+    void numericRangeDashesAreNeverTouched() {
+        Humanized result = humanizer(0.9).humanize(
+                "Цена 10 — 15%, а по акции 20 — 25%.", "ru", QUIET_STYLE);
+        assertThat(result.text()).isEqualTo("Цена 10 — 15%, а по акции 20 — 25%.");
+    }
+
+    @Test
+    void onlyTheFirstNonStructuralDashSurvivesLaterOnesBecomeCommas() {
+        Humanized result = humanizer(0.9).humanize(
+                "Это — важно, а то — нет, и вот — ещё", "ru", QUIET_STYLE);
+        assertThat(result.text()).isEqualTo("Это — важно, а то, нет, и вот, ещё");
+    }
+
+    // --- list-marker collapsing regressions ---
+
+    @Test
+    void singleNumberedLineIsKeptAsIsNotTreatedAsAList() {
+        Humanized result = humanizer(0.9).humanize("2. Согласен", "ru", QUIET_STYLE);
+        assertThat(result.text()).isEqualTo("2. Согласен");
+    }
+
+    @Test
+    void realTwoLineListCollapsesIntoOneSentenceLine() {
+        Humanized result = humanizer(0.9).humanize("- один\n- два", "ru", QUIET_STYLE);
+        assertThat(result.text()).isEqualTo("один. два.");
+    }
+
+    // --- emoji-unit regressions: ZWJ family sequences and flags count as ONE unit ---
+
+    @Test
+    void emojiNoneRemovesThinkingFlagAndSkinToneEmojiEntirely() {
+        Humanized result = humanizer(0.9).humanize("Хм 🤔 ура 🇺🇦 ладно 👍🏽", "ru", QUIET_STYLE);
+        assertThat(result.text()).doesNotContain("🤔").doesNotContain("🇺🇦").doesNotContain("👍🏽");
+    }
+
+    @Test
+    void emojiRareKeepsExactlyOneWholeUnitEvenAFamilySequence() {
+        PersonaStyle rare = new PersonaStyle(2, PersonaStyle.EmojiUsage.RARE, false, false, 0.0, List.of(), List.of(), null);
+        Humanized result = humanizer(0.9).humanize("рады 👨‍👩‍👧 👍🏽 🔥", "ru", rare);
+        // The family ZWJ sequence (👨‍👩‍👧) must survive whole — not half-stripped to a lone 👨.
+        assertThat(result.text()).contains("👨‍👩‍👧");
+        assertThat(result.text()).doesNotContain("👍🏽").doesNotContain("🔥");
+    }
+
+    // --- markdown link regression ---
+
+    @Test
+    void markdownLinkBecomesTextFollowedByBareUrl() {
+        Humanized result = humanizer(0.9).humanize("[статья](https://example.com/a)", "ru", QUIET_STYLE);
+        assertThat(result.text()).isEqualTo("статья (https://example.com/a)");
+    }
 }

@@ -341,6 +341,49 @@ final class DigestGenerationServiceImplTest {
                 .verifyComplete();
     }
 
+    // --- humanizeContent(...) branches, exercised through the public generateDigest(...) API ---
+
+    @Test
+    void humanizeContentKeepsRawContentWhenHumanizerReportsSilence() {
+        DigestPersona persona = createPersona(10L, "SkipTest", "PROFESSIONAL");
+        MessageEntity message = createMessage(111L, 1012L, "Skip test content");
+        when(personaRepository.findById(10L)).thenReturn(Mono.just(persona));
+        when(messageRepository.findQualityMessagesForDigest(any(Instant.class), anyInt(), anyInt()))
+                .thenReturn(Flux.just(message));
+        when(deepSeekApiClient.chat(any(DeepSeekChatRequest.class), anyLong(), anyInt()))
+                .thenReturn(Mono.just("Raw LLM output"));
+        // Digests are human-reviewed before publish (unlike live replies), so a humanizer
+        // silence verdict must NOT drop the content — the raw LLM text is kept instead.
+        when(replyHumanizer.humanize(eq("Raw LLM output"), any(), any()))
+                .thenReturn(new com.example.telegramuserbot.service.humanization.ReplyHumanizer.Humanized("", true, false));
+        when(historyRepository.save(any(DigestHistory.class))).thenReturn(Mono.just(new DigestHistory(10L, "d-test", "content")));
+
+        StepVerifier.create(service.generateDigest(10L))
+                .assertNext(dto -> assertThat(dto.content(), is("Raw LLM output")))
+                .verifyComplete();
+    }
+
+    @Test
+    void humanizeContentUsesHumanizedTextWhenItStillReadsAsAiWritten() {
+        DigestPersona persona = createPersona(11L, "AiTellTest", "PROFESSIONAL");
+        MessageEntity message = createMessage(112L, 1013L, "AI tell test content");
+        when(personaRepository.findById(11L)).thenReturn(Mono.just(persona));
+        when(messageRepository.findQualityMessagesForDigest(any(Instant.class), anyInt(), anyInt()))
+                .thenReturn(Flux.just(message));
+        when(deepSeekApiClient.chat(any(DeepSeekChatRequest.class), anyLong(), anyInt()))
+                .thenReturn(Mono.just("I am an AI language model"));
+        // aiTell=true only logs a warning (see production code) — the humanized text is still
+        // what gets used, and the pipeline must not throw.
+        when(replyHumanizer.humanize(eq("I am an AI language model"), any(), any()))
+                .thenReturn(new com.example.telegramuserbot.service.humanization.ReplyHumanizer.Humanized(
+                        "humanized fallback text", false, true));
+        when(historyRepository.save(any(DigestHistory.class))).thenReturn(Mono.just(new DigestHistory(11L, "d-test", "content")));
+
+        StepVerifier.create(service.generateDigest(11L))
+                .assertNext(dto -> assertThat(dto.content(), is("humanized fallback text")))
+                .verifyComplete();
+    }
+
     private DigestPersona createPersona(Long id, String name, String style) {
         DigestPersona persona = new DigestPersona();
         persona.setId(id);

@@ -9,7 +9,10 @@ import it.tdlight.client.GenericUpdateHandler;
 import it.tdlight.client.Result;
 import it.tdlight.jni.TdApi;
 import org.junit.jupiter.api.Test;
+import reactor.core.Disposable;
+import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
+import reactor.test.scheduler.VirtualTimeScheduler;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -181,6 +184,100 @@ class HumanSendPacerTest {
                 .isGreaterThanOrEqualTo(1);
     }
 
+    @Test
+    void secondPaceCallForSamePersonaChatRespectsTheFirstOnesReservedSendSlot() {
+        long nowMs = 1_000_000L;
+        FixedInstantClock clock = new FixedInstantClock(Instant.ofEpochMilli(nowMs));
+        HumanSendPacer pacer = new HumanSendPacer(mock(TelegramClientManager.class),
+                settingsWith(Map.of(
+                        "reply_timing.random_delay.max_ms", 0L,
+                        "reply_timing.stagger.step_ms", 0L,
+                        "reply_timing.typing.ms_per_char", 60,
+                        "reply_timing.typing.cap_ms", 8000,
+                        "reply_timing.min_gap_same_chat_ms", 25_000L
+                )), clock, new FixedRandom(0L, 0.0));
+        String key = BOT_ID + "|" + CHAT_ID;
+        HumanSendPacer.PacingHints hints = HumanSendPacer.PacingHints.direct(0, null, 0);
+
+        // pace() reserves its planned send slot (now + preSendMs + typingMs) the moment it is
+        // CALLED, before the delay/typing even runs and long before any markSent() — this is
+        // what makes two back-to-back pace() calls for the same key see each other. Text is
+        // 50 chars -> typingMs = 50*60 = 3000, so the reserved slot is 1_000_000+0+3000=1_003_000.
+        Mono<Void> ignored = pacer.pace(BOT_ID, CHAT_ID, "x".repeat(50), hints);
+
+        // Second call, same instant, no markSent in between: the raw formula alone would give
+        // baseDelay=0 again, but the gap must be computed against the slot the FIRST call just
+        // reserved, not against an empty map.
+        long secondBaseDelay = pacer.computePreSendDelayMs(hints, nowMs);
+        long secondGappedDelay = pacer.applyMinimumGap(key, secondBaseDelay, nowMs);
+
+        // earliestAllowed = reservedSlot(1_003_000) + minGap(25_000) = 1_028_000; jitter=0 (FixedRandom).
+        assertThat(secondGappedDelay)
+                .as("the second pace() call must respect the first call's reserved slot, not a stale/empty map")
+                .isEqualTo(28_000L);
+    }
+
+    @Test
+    void markSentNeverMovesTheRecordedTimestampBackwards() {
+        MutableInstantClock clock = new MutableInstantClock(Instant.ofEpochMilli(2_000_000L));
+        HumanSendPacer pacer = new HumanSendPacer(mock(TelegramClientManager.class),
+                settingsWith(Map.of("reply_timing.min_gap_same_chat_ms", 25_000L)),
+                clock, new FixedRandom(0L, 0.0));
+        String key = BOT_ID + "|" + CHAT_ID;
+
+        pacer.markSent(BOT_ID, CHAT_ID); // records 2_000_000
+        clock.set(Instant.ofEpochMilli(1_000_000L));
+        pacer.markSent(BOT_ID, CHAT_ID); // an EARLIER send must not overwrite the later recorded time
+
+        long nowMs = 1_000_000L;
+        long gappedMs = pacer.applyMinimumGap(key, 0L, nowMs);
+
+        // If the later timestamp (2_000_000) survived: earliestAllowed=2_025_000, gappedMs=1_025_000.
+        // A regression letting the earlier markSent overwrite it would instead give gappedMs=25_000.
+        assertThat(gappedMs)
+                .as("markSent must merge with max — an earlier call must never move lastSentAt backwards")
+                .isEqualTo(1_025_000L);
+    }
+
+    @Test
+    void typingRefreshLoopStopsWhenPaceIsCancelled() {
+        AtomicInteger typingCalls = new AtomicInteger();
+        TelegramClientManager clientManager = mock(TelegramClientManager.class);
+        when(clientManager.getClient(BOT_ID)).thenReturn(fakeClient(typingCalls));
+
+        HumanSendPacer pacer = new HumanSendPacer(
+                clientManager,
+                settingsWith(Map.of(
+                        "reply_timing.random_delay.max_ms", 0L,
+                        "reply_timing.stagger.step_ms", 0L,
+                        "reply_timing.typing.ms_per_char", 60,
+                        "reply_timing.typing.cap_ms", 60_000,
+                        "reply_timing.min_gap_same_chat_ms", 0L
+                )),
+                Clock.systemUTC(),
+                new FixedRandom(0L, 0.0));
+
+        String replyText = "x".repeat(1000); // typingWindowMs = min(1000*60, 60000) = 60000
+        HumanSendPacer.PacingHints hints = HumanSendPacer.PacingHints.direct(0, null, 0);
+
+        VirtualTimeScheduler vts = VirtualTimeScheduler.getOrSet();
+        try {
+            Disposable subscription = pacer.pace(BOT_ID, CHAT_ID, replyText, hints).subscribe();
+            vts.advanceTimeBy(Duration.ofMillis(500)); // let the first (immediate) typing tick fire
+            int callsAtCancel = typingCalls.get();
+            assertThat(callsAtCancel).isGreaterThanOrEqualTo(1);
+
+            subscription.dispose(); // cancel the outer send: the typing refresh loop must die with it
+
+            vts.advanceTimeBy(Duration.ofSeconds(30)); // would fire ~7 more refreshes (every 4s) if still running
+            assertThat(typingCalls.get())
+                    .as("cancelling pace() must dispose the typing refresh loop — no SendChatAction after cancel")
+                    .isEqualTo(callsAtCancel);
+        } finally {
+            VirtualTimeScheduler.reset();
+        }
+    }
+
     // --- test helpers -----------------------------------------------------------------------
 
     private static HumanSendPacer pacerWith(Map<String, Object> overrides, RandomGenerator random) {
@@ -278,6 +375,34 @@ class HumanSendPacerTest {
         private final Instant instant;
 
         FixedInstantClock(Instant instant) {
+            this.instant = instant;
+        }
+
+        @Override
+        public ZoneId getZone() {
+            return ZoneOffset.UTC;
+        }
+
+        @Override
+        public Clock withZone(ZoneId zone) {
+            return this;
+        }
+
+        @Override
+        public Instant instant() {
+            return instant;
+        }
+    }
+
+    /** A Clock whose instant can be advanced between calls, for markSent ordering tests. */
+    private static final class MutableInstantClock extends Clock {
+        private Instant instant;
+
+        MutableInstantClock(Instant instant) {
+            this.instant = instant;
+        }
+
+        void set(Instant instant) {
             this.instant = instant;
         }
 
