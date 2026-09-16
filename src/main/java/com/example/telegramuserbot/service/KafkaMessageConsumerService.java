@@ -404,7 +404,7 @@ public class KafkaMessageConsumerService {
 
         Mono<List<String>> botIdsMono = fixedBotIds != null
                 ? Mono.just(fixedBotIds)
-                : chatPersonaDispatchPlanner.planBotIds(messageEntity.getChatId(), base.config() != null ? base.config().getId() : null);
+                : chatPersonaDispatchPlanner.planBotIds(messageEntity.getChatId(), base.config() != null ? base.config().getId() : null, messageEntity);
 
         return botIdsMono
                 .flatMapMany(botIds -> {

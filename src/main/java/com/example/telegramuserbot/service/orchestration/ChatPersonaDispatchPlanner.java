@@ -1,6 +1,7 @@
 package com.example.telegramuserbot.service.orchestration;
 
 import com.example.telegramuserbot.domain.Channel;
+import com.example.telegramuserbot.domain.MessageEntity;
 import com.example.telegramuserbot.domain.RateLimits;
 import com.example.telegramuserbot.repository.ChannelRepository;
 import com.example.telegramuserbot.repository.PersonaChatBindingRepository;
@@ -18,6 +19,7 @@ import reactor.core.publisher.Mono;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
@@ -41,6 +43,7 @@ public class ChatPersonaDispatchPlanner {
     private final PersonaScheduleService personaScheduleService;
     private final TelegramAccountRepository telegramAccountRepository;
     private final AppSettingsService appSettings;
+    private final PersonaAddressResolver personaAddressResolver;
 
     @Value("${llm.persona-fanout.daily-quota.reserve-retries:2}")
     private int reserveRetries;
@@ -80,7 +83,8 @@ public class ChatPersonaDispatchPlanner {
                                       PersonaChatBindingRepository personaChatBindingRepository,
                                       PersonaScheduleService personaScheduleService,
                                       TelegramAccountRepository telegramAccountRepository,
-                                      AppSettingsService appSettings) {
+                                      AppSettingsService appSettings,
+                                      PersonaAddressResolver personaAddressResolver) {
         this.channelRepository = channelRepository;
         this.telegramClientManager = telegramClientManager;
         this.rateLimitsRepository = rateLimitsRepository;
@@ -88,25 +92,58 @@ public class ChatPersonaDispatchPlanner {
         this.personaScheduleService = personaScheduleService;
         this.telegramAccountRepository = telegramAccountRepository;
         this.appSettings = appSettings;
+        this.personaAddressResolver = personaAddressResolver;
     }
 
+    /** No triggering message known (e.g. scheduled/synthetic fan-out) — nobody can be directly addressed. */
     public Mono<List<String>> planBotIds(long chatId, Long chatConfigId) {
+        return planBotIds(chatId, chatConfigId, null);
+    }
+
+    /**
+     * @param trigger the inbound message that caused this fan-out, or null when there is none.
+     *                When trigger directly addresses one candidate (reply-to or @mention/name),
+     *                that persona ALWAYS replies (owner rule) — bypassing the probability roll —
+     *                and every other candidate stays quiet.
+     */
+    public Mono<List<String>> planBotIds(long chatId, Long chatConfigId, MessageEntity trigger) {
         return resolveCandidates(chatId)
                 .map(this::normalizeAndDedupePreservingOrder)
                 .doOnNext(botIds -> log.info("[Chat {}] Normalized dispatch candidates: {}", chatId, botIds))
                 .flatMap(botIds -> validateClientsOrFail(chatId, botIds).thenReturn(botIds))
-                // A collector persona is harvest-only BY DEFAULT, but an explicit enabled
-                // reply-binding for THIS chat is the owner's per-persona opt-in (each persona =
-                // a DB toggle) and lets it reply here. Personas outside their activity window
-                // are also not candidates (schedule-based activity; NULL window = always on).
-                .flatMap(botIds -> Flux.fromIterable(botIds)
-                        .filterWhen(botId -> isAllowedToReply(chatId, botId))
-                        .filterWhen(personaScheduleService::isActiveNow)
-                        .collectList())
-                .flatMap(botIds -> selectFinalResponders(chatId, botIds))
+                .flatMap(botIds -> personaAddressResolver.resolveAddressed(trigger, botIds)
+                        // A collector persona is harvest-only BY DEFAULT, but an explicit enabled
+                        // reply-binding for THIS chat is the owner's per-persona opt-in (each persona =
+                        // a DB toggle) and lets it reply here. Personas outside their activity window
+                        // are also not candidates (schedule-based activity; NULL window = always on).
+                        .flatMap(addressed -> Flux.fromIterable(botIds)
+                                .filterWhen(botId -> isAllowedToReply(chatId, botId))
+                                .filterWhen(personaScheduleService::isActiveNow)
+                                .collectList()
+                                .flatMap(scheduledBotIds -> resolveResponders(chatId, scheduledBotIds, addressed))))
                 .flatMap(botIds -> applyDailyQuota(chatId, chatConfigId, botIds, Math.max(0, reserveRetries))
                         .doOnNext(selected -> log.info("[Chat {}] Persona fan-out final list: {} (chatConfigId={})",
                                 chatId, selected, chatConfigId)));
+    }
+
+    /**
+     * When a persona was directly addressed, it ALWAYS replies — no roll, no cap — as long as
+     * it survived the collector/schedule filters; every other candidate stays quiet. If the
+     * addressed persona was filtered out (asleep or collector-only), nobody answers on its
+     * behalf. Otherwise falls through to the normal probability/cap selection.
+     */
+    private Mono<List<String>> resolveResponders(long chatId, List<String> scheduledBotIds, Optional<String> addressed) {
+        if (addressed.isPresent()) {
+            String addressedBotId = addressed.get();
+            if (scheduledBotIds.contains(addressedBotId)) {
+                log.info("[Chat {}] Addressed persona {} replies; others stay quiet", chatId, addressedBotId);
+                return Mono.just(List.of(addressedBotId));
+            }
+            log.info("[Chat {}] Addressed persona {} was filtered out (asleep or collector-only); nobody answers on its behalf",
+                    chatId, addressedBotId);
+            return Mono.just(List.of());
+        }
+        return selectFinalResponders(chatId, scheduledBotIds);
     }
 
     private Mono<List<String>> resolveCandidates(long chatId) {
