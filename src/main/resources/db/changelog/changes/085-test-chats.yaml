@@ -1,0 +1,22 @@
+databaseChangeLog:
+  - changeSet:
+      id: 085-test-chats
+      author: claude
+      comment: >-
+        Register the chats set aside for send/receive checks (cs085). Whether a
+        persona can still put a message into Telegram and answer an incoming one
+        can only be verified against a real chat; these are the chats where that
+        is allowed. /api/admin/test-chat refuses every chat outside this list, so
+        a mistyped chat id cannot drop a test message into a live conversation.
+        Idempotent: ON CONFLICT DO NOTHING, so an edited list is never overwritten.
+      changes:
+        - sql:
+            sql: |
+              INSERT INTO bot.app_settings (name, value, value_type, description) VALUES
+                ('test.chats', '-4964162923,-1003869517196', 'string',
+                 'Comma-separated chat ids reserved for send/receive testing. Only these can be driven by /api/admin/test-chat.')
+              ON CONFLICT (name) DO NOTHING
+      rollback:
+        - sql:
+            sql: |
+              DELETE FROM bot.app_settings WHERE name = 'test.chats'
