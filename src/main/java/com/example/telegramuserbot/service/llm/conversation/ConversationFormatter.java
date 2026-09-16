@@ -34,20 +34,4 @@ public interface ConversationFormatter {
                         MessageEntity triggeringMessage,
                         String botInstanceId,
                         Long selfTelegramUserId);
-
-    /**
-     * Formats conversation messages with media placeholder support.
-     *
-     * @param contextMessages previous messages in the conversation for context
-     * @param triggeringMessage the message that triggered the response
-     * @param botInstanceId identifier for the bot instance
-     * @param selfTelegramUserId the Telegram user ID of the bot (for identifying own messages)
-     * @param includeMediaPlaceholders whether to include media type placeholders in content
-     * @return formatted result with API messages and speaker context
-     */
-    FormatResult format(List<MessageEntity> contextMessages,
-                        MessageEntity triggeringMessage,
-                        String botInstanceId,
-                        Long selfTelegramUserId,
-                        boolean includeMediaPlaceholders);
 }
