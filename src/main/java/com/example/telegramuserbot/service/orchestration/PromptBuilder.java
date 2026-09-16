@@ -1,10 +1,8 @@
 package com.example.telegramuserbot.service.orchestration;
 
 import com.example.telegramuserbot.domain.ChatConfig;
-import com.example.telegramuserbot.domain.LlmParameters;
-import com.example.telegramuserbot.domain.ResponseFormat;
-import com.example.telegramuserbot.service.UserService;
 import com.example.telegramuserbot.service.humanization.PersonaService;
+import com.example.telegramuserbot.service.humanization.PersonaStyle;
 import com.example.telegramuserbot.service.llm.conversation.LlmSpeakerContext;
 import com.example.telegramuserbot.service.orchestration.dto.EnhancedPromptRequest;
 import org.slf4j.Logger;
@@ -16,8 +14,10 @@ import java.util.Optional;
 /**
  * Builds the final system prompt for LLM interactions.
  *
- * <p>Assembles prompt components: persona, behavior template (ResponseTemplate),
- * language/style settings, and base prompt. Supports user preferences integration.
+ * <p>Resolves the persona identity and its writing-habit style, then hands them
+ * together with the request to {@link PersonaPromptComposer}, which renders the
+ * whole thing as a natural-language brief — a living persona's instructions, not
+ * a JSON config dump.
  *
  * <p>Recommended usage with builder pattern:
  * <pre>{@code
@@ -32,7 +32,7 @@ import java.util.Optional;
  * }</pre>
  *
  * @see EnhancedPromptRequest
- * @see PromptJsonSerializer
+ * @see PersonaPromptComposer
  */
 @Component
 public class PromptBuilder {
@@ -40,22 +40,17 @@ public class PromptBuilder {
     private static final Logger log = LoggerFactory.getLogger(PromptBuilder.class);
 
     private final PersonaService personaService;
-    private final UserService userService;
-    private final PromptJsonSerializer serializer;
+    private final PersonaPromptComposer composer;
 
     /**
      * Creates a new PromptBuilder with required dependencies.
      *
-     * @param personaService service for building persona prompts
-     * @param userService service for user personalization
-     * @param serializer JSON serialization service for prompt components
+     * @param personaService service for resolving the persona identity and its style
+     * @param composer natural-language prompt composer
      */
-    public PromptBuilder(PersonaService personaService,
-                         UserService userService,
-                         PromptJsonSerializer serializer) {
+    public PromptBuilder(PersonaService personaService, PersonaPromptComposer composer) {
         this.personaService = personaService;
-        this.userService = userService;
-        this.serializer = serializer;
+        this.composer = composer;
     }
 
     /**
@@ -73,7 +68,6 @@ public class PromptBuilder {
      *     .llmParameters(llmParams)
      *     .fallbackPrompt("Respond naturally.")
      *     .fallbackLanguage("auto")
-     *     .user(user)
      *     .speakerContext(speakers)
      *     .pendingResponses(pending)
      *     .build();
@@ -82,51 +76,30 @@ public class PromptBuilder {
      * }</pre>
      *
      * @param request the prompt request containing all parameters
-     * @return the assembled system prompt as a JSON string
+     * @return the assembled system prompt as natural-language plain text
      * @see EnhancedPromptRequest
      */
     public String buildEnhancedPrompt(EnhancedPromptRequest request) {
         ChatConfig chatConfig = request.chatConfig();
-        LlmParameters llmParameters = request.llmParameters();
         LlmSpeakerContext speakerContext = request.speakerContext();
-        String basePrompt = Optional.ofNullable(chatConfig)
-                .map(ChatConfig::getPromptTemplate)
-                .filter(p -> p != null && !p.isBlank())
-                .orElse(request.fallbackPrompt());
         String languageHint = Optional.ofNullable(chatConfig)
                 .map(ChatConfig::getLanguage)
                 .filter(lang -> !lang.isBlank())
                 .orElse(request.fallbackLanguage());
-        String personaBlock = personaService.buildPersonaSystemPrompt(
-                null,
-                languageHint,
-                speakerContext != null ? speakerContext.botInstanceId() : null
-        );
-        String userPersonalization = request.user() != null ? userService.buildPersonalizedPrompt(request.user(), "") : "";
-        ResponseFormat responseFormat = Optional.ofNullable(llmParameters)
-                .map(LlmParameters::getResponseFormat)
-                .orElse(ResponseFormat.TEXT);
-        StringBuilder builder = new StringBuilder();
-        builder.append("{\n")
-                .append(serializer.personaJson(personaBlock))
-                .append(serializer.chatConfigJson(chatConfig, request.rateLimits(), languageHint, basePrompt))
-                .append(serializer.llmParametersJson(llmParameters))
-                .append(serializer.responseTemplateJson(request.template(), responseFormat, request.directives()))
-                .append(serializer.responseRulesJson(languageHint, responseFormat))
-                .append(serializer.speakerContextJson(speakerContext))
-                .append(serializer.knowledgeJson(request.knowledgeBlock()))
-                .append(serializer.pendingResponsesJson(request.pendingResponses()))
-                .append(serializer.userPersonalizationJson(userPersonalization))
-                .append("}");
-        String prompt = builder.toString();
+        String botId = speakerContext != null ? speakerContext.botInstanceId() : null;
+
+        String identityBlock = personaService.buildPersonaSystemPrompt(null, languageHint, botId);
+        PersonaStyle style = personaService.resolveStyle(botId, languageHint);
+        String prompt = composer.compose(request, identityBlock, style);
+
         if (log.isDebugEnabled()) {
             log.debug(
-                    "[PromptBuilder] system prompt built (len={}, chatConfigId={}, templateId={}, lang={}, userPresent={})",
+                    "[PromptBuilder] system prompt built (len={}, chatConfigId={}, templateId={}, lang={}, botId={})",
                     prompt.length(),
                     chatConfig != null ? chatConfig.getId() : null,
                     request.template() != null ? request.template().getId() : null,
                     languageHint,
-                    request.user() != null
+                    botId
             );
         }
         return prompt;

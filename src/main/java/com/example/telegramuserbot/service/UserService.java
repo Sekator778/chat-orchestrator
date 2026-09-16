@@ -77,62 +77,6 @@ public class UserService {
         return userRepository.findByTelegramUserId(telegramUserId);
     }
 
-    public String buildPersonalizedPrompt(User user, String basePrompt) {
-        if (user == null) {
-            return basePrompt;
-        }
-
-        StringBuilder personalizedPrompt = new StringBuilder();
-
-        if (basePrompt != null && !basePrompt.isBlank()) {
-            personalizedPrompt.append(basePrompt).append("\n\n");
-        }
-
-        personalizedPrompt.append("ПЕРСОНАЛІЗАЦІЯ СПІЛКУВАННЯ:\n");
-
-        String addressName = user.getDisplayName();
-        if (user.getPreferredTitle() != null && !user.getPreferredTitle().isBlank()) {
-            addressName = user.getPreferredTitle() + " " + addressName;
-        }
-        personalizedPrompt.append("- Звертайся до співрозмовника як: ").append(addressName).append("\n");
-
-        personalizedPrompt.append("- Стиль спілкування: ").append(user.getCommunicationStyle().getDescription()).append("\n");
-
-        personalizedPrompt.append("- Довжина відповідей: ").append(user.getResponseLength().getDescription()).append("\n");
-
-        personalizedPrompt.append("- Мова спілкування: ");
-        switch (user.getLanguagePreference()) {
-            case "uk" -> personalizedPrompt.append("українська");
-            case "ru" -> personalizedPrompt.append("російська");
-            case "en" -> personalizedPrompt.append("англійська");
-            case "auto" -> personalizedPrompt.append("автовизначення (відповідай мовою запитання)");
-            default -> personalizedPrompt.append("українська (за замовчуванням)");
-        }
-        personalizedPrompt.append("\n");
-
-        if (user.getPersonalityTraits() != null && !user.getPersonalityTraits().isBlank()) {
-            personalizedPrompt.append("- Особливості особистості співрозмовника: ").append(user.getPersonalityTraits()).append("\n");
-        }
-
-        if (user.getRelationshipContext() != null && !user.getRelationshipContext().isBlank()) {
-            personalizedPrompt.append("- Контекст стосунків: ").append(user.getRelationshipContext()).append("\n");
-        }
-
-        personalizedPrompt.append("\nЗавжди враховуй ці персональні налаштування у своїх відповідях.");
-
-        return personalizedPrompt.toString();
-    }
-
-    /**
-     * Принимает Mono<User> и применяет к нему синхронную логику персонализации.
-     * Этот метод будет вызываться из EnhancedLlmService.
-     */
-    public Mono<String> buildPersonalizedPrompt(Mono<User> userMono, String basePrompt) {
-        return userMono
-                .map(user -> buildPersonalizedPrompt(user, basePrompt)) // Применяем синхронную логику внутри .map()
-                .defaultIfEmpty(basePrompt); // Если пользователь не найден (Mono пустой), возвращаем базовый промпт
-    }
-
     public Mono<User> saveUser(User user) {
         return userRepository.save(user);
     }
