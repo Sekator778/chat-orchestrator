@@ -185,6 +185,12 @@ public class PersonaServiceImpl implements PersonaService {
     }
 
     @Override
+    public PersonaStyle resolveStyle(String botId, String languageHint) {
+        // Baseline contract: metadata.style parsing lands with the persona prompt work.
+        return PersonaStyle.defaults();
+    }
+
+    @Override
     public String getPersonaResponse(String userQuestion, String botId) {
         if (userQuestion == null || userQuestion.isBlank()) {
             return null;
