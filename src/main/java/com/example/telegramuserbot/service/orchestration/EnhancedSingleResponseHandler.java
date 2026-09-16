@@ -6,6 +6,8 @@ import com.example.telegramuserbot.domain.ResponseTone;
 import com.example.telegramuserbot.domain.LlmQueryPhase;
 import com.example.telegramuserbot.domain.LlmQueryStatus;
 import com.example.telegramuserbot.dto.ResponsePayload;
+import com.example.telegramuserbot.service.humanization.PersonaService;
+import com.example.telegramuserbot.service.humanization.PersonaStyle;
 import com.example.telegramuserbot.service.llm.EnhancedLlmService;
 import com.example.telegramuserbot.service.llm.dto.ApiMessage;
 import com.example.telegramuserbot.service.orchestration.dto.ResponseDirectives;
@@ -31,6 +33,7 @@ public class EnhancedSingleResponseHandler {
     private final ResponseMapper responseMapper;
     private final PendingResponseCoordinator pendingResponseCoordinator;
     private final LlmTrackingFacade trackingFacade;
+    private final PersonaService personaService;
 
     public EnhancedSingleResponseHandler(ContextCollector contextCollector,
                                         LlmMessageBuilder llmMessageBuilder,
@@ -39,7 +42,8 @@ public class EnhancedSingleResponseHandler {
                                         ResponsePostProcessor responsePostProcessor,
                                         ResponseMapper responseMapper,
                                         PendingResponseCoordinator pendingResponseCoordinator,
-                                        LlmTrackingFacade trackingFacade) {
+                                        LlmTrackingFacade trackingFacade,
+                                        PersonaService personaService) {
         this.contextCollector = contextCollector;
         this.llmMessageBuilder = llmMessageBuilder;
         this.llmCallService = llmCallService;
@@ -48,6 +52,7 @@ public class EnhancedSingleResponseHandler {
         this.responseMapper = responseMapper;
         this.pendingResponseCoordinator = pendingResponseCoordinator;
         this.trackingFacade = trackingFacade;
+        this.personaService = personaService;
     }
 
     /**
@@ -98,13 +103,18 @@ public class EnhancedSingleResponseHandler {
                                               ContextCollector.ConversationContext context,
                                               List<ApiMessage> apiMessages,
                                               com.example.telegramuserbot.service.tracking.LlmQueryTracker tracker) {
+        String lang = cfg.config() != null ? cfg.config().getLanguage() : null;
+        PersonaStyle style = personaService.resolveStyle(cfg.botInstanceId(), lang);
         return llmCallService.call(chatId, triggeringMessageId, "ENHANCED", apiMessages, cfg.config(), cfg.llmParameters(),
                         tracker, LlmQueryPhase.SINGLE_STAGE_GENERATION, 1, Map.of("stage", "single"))
                 .flatMap(raw -> searchAugmentor.augmentIfNeeded(raw, rawText != null ? rawText : "", chatId))
-                .map(content -> {
-                    String processed = responsePostProcessor.postProcess(content, template);
+                .flatMap(content -> {
+                    String processed = responsePostProcessor.postProcess(content, template, lang, style);
                     llmCallService.logNormalizedIfChanged(chatId, "ENHANCED", content, processed);
-                    return responseMapper.mapEnhanced(
+                    if (processed == null || processed.isBlank()) {
+                        return skipSilently(chatId, tracker, "ENHANCED humanizer вернул пустой текст (skip/aiTell)");
+                    }
+                    return Mono.just(responseMapper.mapEnhanced(
                             new EnhancedLlmService.EnhancedLlmResponse(
                                     processed,
                                     content,
@@ -116,7 +126,7 @@ public class EnhancedSingleResponseHandler {
                                     template
                             ),
                             context.totalMessages(),
-                            context.totalCharacters());
+                            context.totalCharacters()));
                 })
                 .doOnSubscribe(sub -> log.debug("[Chat {}] Используем расширенный пайплайн (ENHANCED)", chatId))
                 .switchIfEmpty(Mono.defer(() -> skipSilently(chatId, tracker, "ENHANCED цепочка вернула empty")))

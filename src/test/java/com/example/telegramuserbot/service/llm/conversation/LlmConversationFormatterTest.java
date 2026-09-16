@@ -1,6 +1,5 @@
 package com.example.telegramuserbot.service.llm.conversation;
 
-import com.example.telegramuserbot.domain.MediaKind;
 import com.example.telegramuserbot.domain.MessageEntity;
 import com.example.telegramuserbot.domain.MessageType;
 import com.example.telegramuserbot.service.llm.dto.ApiMessage;
@@ -194,81 +193,17 @@ class LlmConversationFormatterTest {
         return msg;
     }
 
-    @Test
-    void shouldIncludePhotoPlaceholderWhenMediaPlaceholdersEnabled() {
-        MessageEntity msg = createMessage(1L, 456L, "Check this out", false, "user", null, null);
-        msg.setMediaType(MediaKind.PHOTO);
-        ConversationFormatter.FormatResult result = formatter.format(null, msg, "bot-1", 123L, true);
-        assertThat(result.messages()).hasSize(1);
-        String content = result.messages().get(0).content();
-        assertThat(content).contains("[Фото]");
-        assertThat(content).contains("Check this out");
-    }
-
-    @Test
-    void shouldIncludeVideoPlaceholderWhenEnabled() {
-        MessageEntity msg = createMessage(1L, 456L, "Watch this", false, "user", null, null);
-        msg.setMediaType(MediaKind.VIDEO);
-        ConversationFormatter.FormatResult result = formatter.format(null, msg, "bot-1", 123L, true);
-        String content = result.messages().get(0).content();
-        assertThat(content).contains("[Відео]");
-    }
-
-    @Test
-    void shouldIncludeVoicePlaceholderWhenEnabled() {
-        MessageEntity msg = createMessage(1L, 456L, "", false, "user", null, null);
-        msg.setMediaType(MediaKind.VOICE);
-        ConversationFormatter.FormatResult result = formatter.format(null, msg, "bot-1", 123L, true);
-        String content = result.messages().get(0).content();
-        assertThat(content).contains("[Голосове повідомлення]");
-    }
-
-    @Test
-    void shouldNotIncludeMediaPlaceholderWhenDisabled() {
-        MessageEntity msg = createMessage(1L, 456L, "Check this out", false, "user", null, null);
-        msg.setMediaType(MediaKind.PHOTO);
-        ConversationFormatter.FormatResult result = formatter.format(null, msg, "bot-1", 123L, false);
-        String content = result.messages().get(0).content();
-        assertThat(content).doesNotContain("[Фото]");
-        assertThat(content).contains("Check this out");
-    }
-
-    @Test
-    void shouldDelegateToNonMediaMethodWhenCalledWithoutMediaFlag() {
-        MessageEntity msg = createMessage(1L, 456L, "Test content", false, "user", null, null);
-        msg.setMediaType(MediaKind.PHOTO);
-        ConversationFormatter.FormatResult result = formatter.format(null, msg, "bot-1", 123L);
-        String content = result.messages().get(0).content();
-        assertThat(content).doesNotContain("[Фото]");
-    }
+    // Media-placeholder formatting ([Фото], [Відео], ...) was decommissioned along with the
+    // 5-arg format() overload — media-only posts now rely on caption fallback (see below).
 
     @Test
     void shouldFilterServiceMessagesFromConversation() {
         MessageEntity serviceMsg = createMessage(1L, 456L, "Config enabled", false, "user", null, null);
         serviceMsg.setMessageType(MessageType.SERVICE_MESSAGE);
         MessageEntity normalMsg = createMessage(2L, 789L, "Hello everyone", false, "user2", null, null);
-        ConversationFormatter.FormatResult result = formatter.format(List.of(serviceMsg), normalMsg, "bot-1", 123L, true);
+        ConversationFormatter.FormatResult result = formatter.format(List.of(serviceMsg), normalMsg, "bot-1", 123L);
         assertThat(result.messages()).hasSize(1);
         assertThat(result.messages().get(0).content()).contains("Hello everyone");
         assertThat(result.messages().get(0).content()).doesNotContain("Config enabled");
-    }
-
-    @Test
-    void shouldIncludeOnlyMediaPlaceholderWhenTextIsBlankButMediaPresent() {
-        MessageEntity msg = createMessage(1L, 456L, "", false, "user", null, null);
-        msg.setMediaType(MediaKind.STICKER);
-        ConversationFormatter.FormatResult result = formatter.format(null, msg, "bot-1", 123L, true);
-        assertThat(result.messages()).hasSize(1);
-        assertThat(result.messages().get(0).content()).contains("[Стікер]");
-    }
-
-    @Test
-    void shouldHandleUnknownMediaTypeGracefully() {
-        MessageEntity msg = createMessage(1L, 456L, "Some text", false, "user", null, null);
-        msg.setMediaType(MediaKind.UNKNOWN);
-        ConversationFormatter.FormatResult result = formatter.format(null, msg, "bot-1", 123L, true);
-        String content = result.messages().get(0).content();
-        assertThat(content).contains("Some text");
-        assertThat(content).doesNotContain("[");
     }
 }

@@ -9,9 +9,9 @@ import com.example.telegramuserbot.repository.DigestHistoryRepository;
 import com.example.telegramuserbot.repository.DigestPersonaRepository;
 import com.example.telegramuserbot.repository.MessageRepository;
 import com.example.telegramuserbot.repository.SourceTrustRepository;
-import com.example.telegramuserbot.service.humanization.AntiDetectionService;
 import com.example.telegramuserbot.service.humanization.PersonaService;
-import com.example.telegramuserbot.service.humanization.ResponseRefinerService;
+import com.example.telegramuserbot.service.humanization.PersonaStyle;
+import com.example.telegramuserbot.service.humanization.ReplyHumanizer;
 import com.example.telegramuserbot.service.llm.client.DeepSeekApiClient;
 import com.example.telegramuserbot.service.llm.dto.ApiMessage;
 import com.example.telegramuserbot.service.llm.dto.DeepSeekChatRequest;
@@ -124,8 +124,7 @@ public final class DigestGenerationServiceImpl implements DigestGenerationServic
     private final SourceTrustRepository sourceTrustRepository;
     private final DeepSeekApiClient deepSeekApiClient;
     private final PersonaService personaService;
-    private final AntiDetectionService antiDetectionService;
-    private final ResponseRefinerService responseRefinerService;
+    private final ReplyHumanizer replyHumanizer;
 
     @Value("${deepseek.model:deepseek-chat}")
     private String defaultModel;
@@ -137,16 +136,14 @@ public final class DigestGenerationServiceImpl implements DigestGenerationServic
             SourceTrustRepository sourceTrustRepository,
             DeepSeekApiClient deepSeekApiClient,
             PersonaService personaService,
-            AntiDetectionService antiDetectionService,
-            ResponseRefinerService responseRefinerService) {
+            ReplyHumanizer replyHumanizer) {
         this.personaRepository = Objects.requireNonNull(personaRepository);
         this.historyRepository = Objects.requireNonNull(historyRepository);
         this.messageRepository = Objects.requireNonNull(messageRepository);
         this.sourceTrustRepository = Objects.requireNonNull(sourceTrustRepository);
         this.deepSeekApiClient = Objects.requireNonNull(deepSeekApiClient);
         this.personaService = Objects.requireNonNull(personaService);
-        this.antiDetectionService = Objects.requireNonNull(antiDetectionService);
-        this.responseRefinerService = Objects.requireNonNull(responseRefinerService);
+        this.replyHumanizer = Objects.requireNonNull(replyHumanizer);
     }
 
     @Override
@@ -438,15 +435,17 @@ public final class DigestGenerationServiceImpl implements DigestGenerationServic
     }
 
     private Mono<String> humanizeContent(String rawContent, DigestPersona persona) {
-        if (antiDetectionService.hasAiPatterns(rawContent)) {
-            log.info("AI patterns detected in post, running refiner");
-            // DigestPersona carries a Telegram user id, not the String bot instance id
-            // the persona registry is keyed by, so the refiner keeps its previous
-            // behaviour here and speaks as the primary persona.
-            return responseRefinerService.refineResponse(rawContent, "news post", persona.botId(), null)
-                    .onErrorReturn(rawContent);
+        ReplyHumanizer.Humanized humanized = replyHumanizer.humanize(rawContent, persona.language(), PersonaStyle.defaults());
+        if (humanized.skip()) {
+            // Digests are reviewed by a human before publish, unlike live replies — never
+            // drop content here, fall back to the raw LLM text instead of losing the post.
+            log.info("Digest humanizer reported silence for personaId={}, keeping raw content", persona.id());
+            return Mono.just(rawContent);
         }
-        return Mono.just(rawContent);
+        if (humanized.aiTell()) {
+            log.warn("Digest content for personaId={} still reads as AI-written after humanizing", persona.id());
+        }
+        return Mono.just(humanized.text());
     }
 
     private Mono<Void> persistHistory(DigestPersona persona, GeneratedDigestDto dto) {
