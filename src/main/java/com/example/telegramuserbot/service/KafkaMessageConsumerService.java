@@ -228,7 +228,8 @@ public class KafkaMessageConsumerService {
 
     private Mono<Void> orchestrateForeignMessage(MessageEntity messageEntity) {
         return messageRepository
-                .countOutgoingMessagesSinceLastInbound(messageEntity.getChatId(), messageEntity.getMessageId())
+                .countOutgoingMessagesSinceLastInbound(messageEntity.getChatId(),
+                        messageEntity.getDate() != null ? messageEntity.getDate() : java.time.Instant.now())
                 .defaultIfEmpty(0L)
                 .flatMap(chainLength -> {
                     int chainLimit = maxBotMessagesPerPost();
