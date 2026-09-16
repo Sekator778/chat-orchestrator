@@ -2,6 +2,7 @@ package com.example.telegramuserbot.service.observability;
 
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.DescribeClusterOptions;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.actuate.health.Health;
@@ -40,6 +41,9 @@ public class KafkaHealthIndicator implements ReactiveHealthIndicator {
     private final AdminClient ownedClient;
     private final String bootstrapServers;
 
+    // Explicit: the package-private test constructor below makes this a two-constructor
+    // bean, and Spring then looks for a no-arg one and fails the whole context.
+    @Autowired
     public KafkaHealthIndicator(
             KafkaAdmin kafkaAdmin,
             @Value("${spring.kafka.bootstrap-servers:unset}") String bootstrapServers,

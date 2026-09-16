@@ -266,6 +266,22 @@
     </build>
 
     <profiles>
+        <!-- Apple Silicon: pick the right TDLight natives without a command-line
+             flag, so the IDE can run the app straight from the Run button. An
+             explicit -Dtdlight.native.classifier on the command line still wins
+             (CI passes linux_amd64_gnu_ssl3 / macos_arm64 that way). -->
+        <profile>
+            <id>natives-macos-arm64</id>
+            <activation>
+                <os>
+                    <family>mac</family>
+                    <arch>aarch64</arch>
+                </os>
+            </activation>
+            <properties>
+                <tdlight.native.classifier>macos_arm64</tdlight.native.classifier>
+            </properties>
+        </profile>
         <profile>
             <id>with-frontend</id>
             <build>

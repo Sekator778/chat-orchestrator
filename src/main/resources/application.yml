@@ -22,7 +22,10 @@ springdoc:
 deepseek:
   apiKey: ${DEEPSEEK_API_KEY:}
   apiUrl: ${DEEPSEEK_API_URL:https://api.deepseek.com/chat/completions}
-  model: ${DEEPSEEK_MODEL:deepseek-chat}
+  # deepseek-chat is a retired alias; the live ids are deepseek-flash (cheap, fast,
+  # enough for chat replies) and deepseek-v4-pro (reasoner: burns output tokens on
+  # reasoning before content, so a small max_tokens comes back empty).
+  model: ${DEEPSEEK_MODEL:deepseek-flash}
   historyLimit: ${DEEPSEEK_HISTORY_LIMIT:30}
   contextLimit: ${DEEPSEEK_CONTEXT_LIMIT:10}
   requestTimeoutSeconds: ${DEEPSEEK_TIMEOUT:90}
